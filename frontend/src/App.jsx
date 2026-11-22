@@ -2,7 +2,6 @@ import React, { useState, useMemo } from 'react';
 import { Train, UtensilsCrossed, ShieldCheck, LogOut } from 'lucide-react';
 import BharatRailSpatial from './BharatRailSpatial';
 import FoodCateringHub from './components/FoodCateringHub';
-import AuthGate from './components/AuthGate';
 import AdminDashboard from './components/AdminDashboard';
 
 function formatIsoDate(dateObj) {
@@ -50,6 +49,7 @@ export default function App() {
       sessionStorage.removeItem('railyatra_verified_user');
     } catch {}
     setActiveSection('booking');
+    window.location.reload();
   };
 
   return (
@@ -65,72 +65,72 @@ export default function App() {
             </span>
           </div>
 
-          {user ? (
-            <div className="flex items-center gap-2 flex-wrap justify-end">
-              {user.role === 'admin' ? (
-                <span className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-full text-xs font-semibold bg-white text-blue-700 border border-blue-500 shadow-sm">
-                  <ShieldCheck className="w-3.5 h-3.5 text-emerald-600" />
-                  Admin Resource Console
-                </span>
-              ) : (
-                <>
-                  <button
-                    onClick={() => setActiveSection('booking')}
-                    className={`flex items-center gap-1.5 px-3.5 py-1.5 rounded-full text-xs font-semibold transition ${
-                      activeSection === 'booking'
-                        ? 'bg-white text-blue-700 border border-blue-500 shadow-sm'
-                        : 'text-blue-100 hover:bg-white/10 border border-white/15'
-                    }`}
-                  >
-                    <Train className="w-3.5 h-3.5" />
-                    3D Coach Booking
-                  </button>
+          <div className="flex items-center gap-2 flex-wrap justify-end">
+            {user?.role === 'admin' ? (
+              <span className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-full text-xs font-semibold bg-white text-blue-700 border border-blue-500 shadow-sm">
+                <ShieldCheck className="w-3.5 h-3.5 text-emerald-600" />
+                Admin Resource Console
+              </span>
+            ) : (
+              <>
+                <button
+                  onClick={() => setActiveSection('booking')}
+                  className={`flex items-center gap-1.5 px-3.5 py-1.5 rounded-full text-xs font-semibold transition ${
+                    activeSection === 'booking'
+                      ? 'bg-white text-blue-700 border border-blue-500 shadow-sm'
+                      : 'text-blue-100 hover:bg-white/10 border border-white/15'
+                  }`}
+                >
+                  <Train className="w-3.5 h-3.5" />
+                  3D Coach Booking
+                </button>
 
-                  <button
-                    onClick={() => setActiveSection('food')}
-                    className={`flex items-center gap-1.5 px-3.5 py-1.5 rounded-full text-xs font-semibold transition ${
-                      activeSection === 'food'
-                        ? 'bg-white text-blue-700 border border-blue-500 shadow-sm'
-                        : 'bg-blue-50 text-blue-700 border border-blue-400 hover:bg-white'
-                    }`}
-                  >
-                    <UtensilsCrossed className="w-3.5 h-3.5" />
-                    Food on Train
-                  </button>
-                </>
-              )}
+                <button
+                  onClick={() => setActiveSection('food')}
+                  className={`flex items-center gap-1.5 px-3.5 py-1.5 rounded-full text-xs font-semibold transition ${
+                    activeSection === 'food'
+                      ? 'bg-white text-blue-700 border border-blue-500 shadow-sm'
+                      : 'bg-blue-50 text-blue-700 border border-blue-400 hover:bg-white'
+                  }`}
+                >
+                  <UtensilsCrossed className="w-3.5 h-3.5" />
+                  Food on Train
+                </button>
+              </>
+            )}
 
-              <div className="hidden sm:flex items-center gap-1.5 px-3 py-1 rounded-full bg-white/10 border border-white/15 text-[11px] text-blue-100">
-                <ShieldCheck className="w-3.5 h-3.5 text-emerald-400" />
-                <span className="max-w-[150px] truncate">{user.email}</span>
-              </div>
+            {user && (
+              <>
+                <div className="hidden sm:flex items-center gap-1.5 px-3 py-1 rounded-full bg-white/10 border border-white/15 text-[11px] text-blue-100">
+                  <ShieldCheck className="w-3.5 h-3.5 text-emerald-400" />
+                  <span className="max-w-[150px] truncate">{user.email || user.mobile}</span>
+                </div>
 
-              <button
-                onClick={handleLogout}
-                className="flex items-center gap-1 px-3 py-1.5 rounded-full text-xs font-semibold text-blue-100 hover:bg-white/15 border border-white/20 transition"
-                title="Sign Out"
-              >
-                <LogOut className="w-3.5 h-3.5" />
-                Sign Out
-              </button>
-            </div>
-          ) : (
-            <span className="inline-flex items-center gap-1.5 text-xs font-semibold text-blue-100 bg-white/10 border border-white/15 px-3 py-1 rounded-full">
-              <ShieldCheck className="w-3.5 h-3.5 text-emerald-400" />
-              Email OTP Verified Access
-            </span>
-          )}
+                <button
+                  onClick={handleLogout}
+                  className="flex items-center gap-1 px-3 py-1.5 rounded-full text-xs font-semibold text-blue-100 hover:bg-white/15 border border-white/20 transition"
+                  title="Sign Out"
+                >
+                  <LogOut className="w-3.5 h-3.5" />
+                  Sign Out
+                </button>
+              </>
+            )}
+          </div>
         </div>
       </nav>
 
-      {!user ? (
-        <AuthGate onAuthenticated={handleAuthenticated} />
-      ) : user.role === 'admin' ? (
+      {user?.role === 'admin' ? (
         <AdminDashboard user={user} />
       ) : activeSection === 'food' ? (
         <FoodCateringHub journeyDate={readableDate} onBack={() => setActiveSection('booking')} />
       ) : (
-        <BharatRailSpatial journeyDate={journeyDate} onDateChange={setJourneyDate} verifiedUser={user} />
+        <BharatRailSpatial
+          journeyDate={journeyDate}
+          onDateChange={setJourneyDate}
+          verifiedUser={user}
+          onAuthenticated={handleAuthenticated}
+        />
       )}
     </div>
   );
