@@ -7,6 +7,7 @@ export default async (req) => {
 
   try {
     const body = await req.json();
+    const rawMobile = String(body.mobile || '').replace(/\D/g, '');
     const email = String(body.email || '').trim().toLowerCase();
     const otp = String(body.otp || '').replace(/\D/g, '');
     const challenge = String(body.challenge || '');
@@ -18,8 +19,8 @@ export default async (req) => {
     const [payloadB64, sig] = challenge.split('.');
     const payload = JSON.parse(Buffer.from(payloadB64, 'base64url').toString('utf8'));
 
-    if (payload.email !== email) {
-      return Response.json({ detail: 'Email does not match OTP request.' }, { status: 400 });
+    if (payload.mobile !== rawMobile || (payload.email || '') !== email) {
+      return Response.json({ detail: 'Mobile number or email does not match OTP request.' }, { status: 400 });
     }
     if (Date.now() > Number(payload.expiresAt)) {
       return Response.json({ detail: 'OTP expired. Click Resend OTP to get a fresh code.' }, { status: 400 });
@@ -38,8 +39,9 @@ export default async (req) => {
       return Response.json({ detail: 'Incorrect 6-digit OTP code.' }, { status: 401 });
     }
 
+    const identity = payload.email || payload.formattedMobile;
     const sessionBody = Buffer.from(
-      JSON.stringify({ sub: email, role: payload.role, iat: Math.floor(Date.now() / 1000) }),
+      JSON.stringify({ sub: identity, role: payload.role, iat: Math.floor(Date.now() / 1000) }),
       'utf8'
     ).toString('base64url');
     const sessionSig = crypto.createHmac('sha256', secret).update(sessionBody).digest('hex');
@@ -47,8 +49,9 @@ export default async (req) => {
     return Response.json({
       access_token: `${sessionBody}.${sessionSig}`,
       user: {
-        email,
-        name: payload.name || email.split('@')[0],
+        mobile: payload.formattedMobile,
+        email: payload.email || '',
+        name: payload.name || payload.formattedMobile,
         role: payload.role,
         verified: true,
         verified_at: new Date().toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' }) + ' IST',
