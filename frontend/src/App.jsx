@@ -1,7 +1,9 @@
 import React, { useState, useMemo } from 'react';
-import { Train, UtensilsCrossed, Calendar } from 'lucide-react';
+import { Train, UtensilsCrossed, ShieldCheck, LogOut } from 'lucide-react';
 import BharatRailSpatial from './BharatRailSpatial';
 import FoodCateringHub from './components/FoodCateringHub';
+import AuthGate from './components/AuthGate';
+import AdminDashboard from './components/AdminDashboard';
 
 function formatIsoDate(dateObj) {
   const y = dateObj.getFullYear();
@@ -11,23 +13,17 @@ function formatIsoDate(dateObj) {
 }
 
 export default function App() {
+  const [user, setUser] = useState(() => {
+    try {
+      const saved = sessionStorage.getItem('railyatra_verified_user');
+      return saved ? JSON.parse(saved) : null;
+    } catch {
+      return null;
+    }
+  });
   const [activeSection, setActiveSection] = useState('booking');
   const todayIso = useMemo(() => formatIsoDate(new Date()), []);
   const [journeyDate, setJourneyDate] = useState(todayIso);
-
-  const quickDates = useMemo(() => {
-    const days = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
-    const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
-    return Array.from({ length: 6 }, (_, i) => {
-      const dt = new Date();
-      dt.setDate(dt.getDate() + i);
-      return {
-        iso: formatIsoDate(dt),
-        tag: i === 0 ? 'Today' : i === 1 ? 'Tomorrow' : days[dt.getDay()],
-        label: `${dt.getDate()} ${months[dt.getMonth()]}`,
-      };
-    });
-  }, []);
 
   const readableDate = useMemo(() => {
     const dt = new Date(`${journeyDate}T00:00:00`);
@@ -40,9 +36,24 @@ export default function App() {
     });
   }, [journeyDate]);
 
+  const handleAuthenticated = (verifiedUser) => {
+    setUser(verifiedUser);
+    try {
+      sessionStorage.setItem('railyatra_verified_user', JSON.stringify(verifiedUser));
+    } catch {}
+    setActiveSection(verifiedUser.role === 'admin' ? 'admin' : 'booking');
+  };
+
+  const handleLogout = () => {
+    setUser(null);
+    try {
+      sessionStorage.removeItem('railyatra_verified_user');
+    } catch {}
+    setActiveSection('booking');
+  };
+
   return (
     <div className="min-h-screen bg-[#f2f5fa] text-slate-900">
-      {/* Top Navbar Matching Deep Navy & Royal Blue Portal Theme */}
       <nav className="sticky top-0 z-50 bg-[#07244d] border-b border-blue-900/60 shadow-sm">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 h-14 flex items-center justify-between gap-4">
           <div className="flex items-center gap-2.5">
@@ -54,89 +65,72 @@ export default function App() {
             </span>
           </div>
 
-          <div className="flex items-center gap-2">
-            <button
-              onClick={() => setActiveSection('booking')}
-              className={`flex items-center gap-1.5 px-3.5 py-1.5 rounded-full text-xs font-semibold transition ${
-                activeSection === 'booking'
-                  ? 'bg-white text-blue-700 border border-blue-500 shadow-sm'
-                  : 'text-blue-100 hover:bg-white/10 border border-white/15'
-              }`}
-            >
-              <Train className="w-3.5 h-3.5" />
-              3D Coach Booking
-            </button>
+          {user ? (
+            <div className="flex items-center gap-2 flex-wrap justify-end">
+              {user.role === 'admin' ? (
+                <span className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-full text-xs font-semibold bg-white text-blue-700 border border-blue-500 shadow-sm">
+                  <ShieldCheck className="w-3.5 h-3.5 text-emerald-600" />
+                  Admin Resource Console
+                </span>
+              ) : (
+                <>
+                  <button
+                    onClick={() => setActiveSection('booking')}
+                    className={`flex items-center gap-1.5 px-3.5 py-1.5 rounded-full text-xs font-semibold transition ${
+                      activeSection === 'booking'
+                        ? 'bg-white text-blue-700 border border-blue-500 shadow-sm'
+                        : 'text-blue-100 hover:bg-white/10 border border-white/15'
+                    }`}
+                  >
+                    <Train className="w-3.5 h-3.5" />
+                    3D Coach Booking
+                  </button>
 
-            <button
-              onClick={() => setActiveSection('food')}
-              className={`flex items-center gap-1.5 px-3.5 py-1.5 rounded-full text-xs font-semibold transition ${
-                activeSection === 'food'
-                  ? 'bg-white text-blue-700 border border-blue-500 shadow-sm'
-                  : 'bg-blue-50 text-blue-700 border border-blue-400 hover:bg-white'
-              }`}
-            >
-              <UtensilsCrossed className="w-3.5 h-3.5" />
-              Food on Train
-            </button>
-          </div>
+                  <button
+                    onClick={() => setActiveSection('food')}
+                    className={`flex items-center gap-1.5 px-3.5 py-1.5 rounded-full text-xs font-semibold transition ${
+                      activeSection === 'food'
+                        ? 'bg-white text-blue-700 border border-blue-500 shadow-sm'
+                        : 'bg-blue-50 text-blue-700 border border-blue-400 hover:bg-white'
+                    }`}
+                  >
+                    <UtensilsCrossed className="w-3.5 h-3.5" />
+                    Food on Train
+                  </button>
+                </>
+              )}
+
+              <div className="hidden sm:flex items-center gap-1.5 px-3 py-1 rounded-full bg-white/10 border border-white/15 text-[11px] text-blue-100">
+                <ShieldCheck className="w-3.5 h-3.5 text-emerald-400" />
+                <span className="max-w-[150px] truncate">{user.email}</span>
+              </div>
+
+              <button
+                onClick={handleLogout}
+                className="flex items-center gap-1 px-3 py-1.5 rounded-full text-xs font-semibold text-blue-100 hover:bg-white/15 border border-white/20 transition"
+                title="Sign Out"
+              >
+                <LogOut className="w-3.5 h-3.5" />
+                Sign Out
+              </button>
+            </div>
+          ) : (
+            <span className="inline-flex items-center gap-1.5 text-xs font-semibold text-blue-100 bg-white/10 border border-white/15 px-3 py-1 rounded-full">
+              <ShieldCheck className="w-3.5 h-3.5 text-emerald-400" />
+              Email OTP Verified Access
+            </span>
+          )}
         </div>
       </nav>
 
-      {/* Train Booking Journey Date Selector Bar */}
-      {activeSection === 'booking' && (
-        <div className="bg-[#07244d] pb-4 pt-2 px-4 sm:px-6 border-b border-blue-900/40">
-          <div className="max-w-7xl mx-auto rounded-2xl bg-white border border-slate-200 px-4 py-3 shadow-sm flex flex-wrap items-center justify-between gap-3">
-            <div className="flex items-center gap-2.5">
-              <div className="w-9 h-9 rounded-xl bg-blue-50 border border-blue-200 flex items-center justify-center text-blue-600">
-                <Calendar className="w-4 h-4" />
-              </div>
-              <div>
-                <span className="block text-[10px] font-bold uppercase tracking-wider text-slate-500">
-                  Journey Date
-                </span>
-                <span className="text-sm font-bold text-slate-900">{readableDate}</span>
-              </div>
-            </div>
-
-            <div className="flex items-center gap-1.5 flex-wrap">
-              {quickDates.map((d) => {
-                const active = journeyDate === d.iso;
-                return (
-                  <button
-                    key={d.iso}
-                    type="button"
-                    onClick={() => setJourneyDate(d.iso)}
-                    className={`px-3 py-1.5 rounded-xl text-xs font-semibold border transition ${
-                      active
-                        ? 'bg-blue-600 text-white border-blue-600 shadow-sm'
-                        : 'bg-blue-50/70 text-blue-700 border-blue-200 hover:bg-blue-100'
-                    }`}
-                  >
-                    <span className="block text-[10px] opacity-85">{d.tag}</span>
-                    <span>{d.label}</span>
-                  </button>
-                );
-              })}
-
-              <label className="relative inline-flex items-center gap-1.5 px-3 py-2 rounded-xl border border-slate-300 bg-slate-50 hover:border-blue-500 text-xs font-semibold text-slate-700 cursor-pointer">
-                <Calendar className="w-3.5 h-3.5 text-blue-600" />
-                <input
-                  type="date"
-                  min={todayIso}
-                  value={journeyDate}
-                  onChange={(e) => e.target.value && setJourneyDate(e.target.value)}
-                  className="bg-transparent outline-none text-xs font-semibold text-slate-800 cursor-pointer"
-                />
-              </label>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {activeSection === 'food' ? (
+      {!user ? (
+        <AuthGate onAuthenticated={handleAuthenticated} />
+      ) : user.role === 'admin' ? (
+        <AdminDashboard user={user} />
+      ) : activeSection === 'food' ? (
         <FoodCateringHub journeyDate={readableDate} onBack={() => setActiveSection('booking')} />
       ) : (
-        <BharatRailSpatial journeyDate={journeyDate} />
+        <BharatRailSpatial journeyDate={journeyDate} onDateChange={setJourneyDate} verifiedUser={user} />
       )}
     </div>
   );
