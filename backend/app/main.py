@@ -1,10 +1,10 @@
-﻿from fastapi import FastAPI, HTTPException, Header
+from fastapi import FastAPI, HTTPException, Header
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
-from typing import List, Optional
+from typing import List, Optional, Dict, Any
 import random
 
-app = FastAPI(title="RailYatra 3D API", version="1.0.0")
+app = FastAPI(title="RailYatra 3D API", version="1.1.0")
 
 app.add_middleware(
     CORSMiddleware,
@@ -14,8 +14,9 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# In-memory store (replace with PostgreSQL / MongoDB in production)
-BOOKINGS = {}
+# In-memory stores (replace with PostgreSQL / MongoDB in production)
+BOOKINGS: Dict[str, dict] = {}
+FOOD_ORDERS: Dict[str, dict] = {}
 
 class LoginRequest(BaseModel):
     email: str
@@ -28,6 +29,13 @@ class BookingRequest(BaseModel):
     berths: List[int]
     passenger_names: List[str]
     total_fare: float
+
+class FoodOrderRequest(BaseModel):
+    pnr: str
+    station_code: str
+    coach_berth: str
+    items: List[Dict[str, Any]]
+    total_amount: float
 
 @app.get("/api/health")
 def health_check():
@@ -56,8 +64,44 @@ def get_pnr_status(pnr: str):
         raise HTTPException(status_code=404, detail="PNR not found")
     return BOOKINGS[pnr]
 
+@app.get("/api/food/pnr/{pnr}")
+def get_food_route_by_pnr(pnr: str):
+    booking = BOOKINGS.get(pnr)
+    return {
+        "pnr": pnr,
+        "train_number": booking["train_number"] if booking else "12952",
+        "coach": booking["coach"] if booking else "B4",
+        "upcoming_stations": [
+            {"code": "KOTA", "name": "Kota Jn", "eta": "21:35", "halt_mins": 10},
+            {"code": "RTM", "name": "Ratlam Jn", "eta": "00:40", "halt_mins": 5},
+            {"code": "BRC", "name": "Vadodara Jn", "eta": "03:50", "halt_mins": 10},
+            {"code": "ST", "name": "Surat", "eta": "05:25", "halt_mins": 5},
+        ],
+    }
+
+@app.post("/api/food/orders")
+def place_food_order(payload: FoodOrderRequest):
+    order_id = f"RYF{random.randint(100000, 999999)}"
+    record = {
+        "order_id": order_id,
+        "status": "PREPARING_AT_STATION",
+        **payload.model_dump(),
+    }
+    FOOD_ORDERS[order_id] = record
+    return record
+
+@app.get("/api/food/orders/{order_id}")
+def track_food_order(order_id: str):
+    if order_id not in FOOD_ORDERS:
+        raise HTTPException(status_code=404, detail="Food order not found")
+    return FOOD_ORDERS[order_id]
+
 @app.get("/api/admin/metrics")
 def admin_metrics(x_role: Optional[str] = Header(default="passenger")):
     if x_role != "admin":
         raise HTTPException(status_code=403, detail="Admin RBAC access required")
-    return {"total_bookings": len(BOOKINGS), "active_rakes": 4}
+    return {
+        "total_bookings": len(BOOKINGS),
+        "total_food_orders": len(FOOD_ORDERS),
+        "active_rakes": 4,
+    }
