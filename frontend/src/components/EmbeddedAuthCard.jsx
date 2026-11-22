@@ -1,7 +1,6 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   Mail,
-  KeyRound,
   ShieldCheck,
   ArrowRight,
   ArrowLeft,
@@ -68,13 +67,15 @@ export default function EmbeddedAuthCard({ onAuthenticated }) {
   const [showPassword, setShowPassword] = useState(false);
 
   const [step, setStep] = useState('details'); // details | otp
-  const [otpInput, setOtpInput] = useState('');
+  const [otpDigits, setOtpDigits] = useState(['', '', '', '', '', '']);
   const [challenge, setChallenge] = useState('');
   const [error, setError] = useState('');
   const [successMsg, setSuccessMsg] = useState('');
   const [loading, setLoading] = useState(false);
   const [secondsLeft, setSecondsLeft] = useState(0);
   const [resendCooldown, setResendCooldown] = useState(0);
+
+  const otpRefs = useRef([]);
 
   useEffect(() => {
     if (secondsLeft <= 0 && resendCooldown <= 0) return;
@@ -88,12 +89,40 @@ export default function EmbeddedAuthCard({ onAuthenticated }) {
   const switchMode = (nextMode) => {
     setMode(nextMode);
     setStep('details');
-    setOtpInput('');
+    setOtpDigits(['', '', '', '', '', '']);
     setChallenge('');
     setPassword('');
     setConfirmPassword('');
     setError('');
     setSuccessMsg('');
+  };
+
+  const handleOtpChange = (index, value) => {
+    const digit = value.replace(/\D/g, '').slice(-1);
+    const updated = [...otpDigits];
+    updated[index] = digit;
+    setOtpDigits(updated);
+    if (digit && index < 5) {
+      otpRefs.current[index + 1]?.focus();
+    }
+  };
+
+  const handleOtpKeyDown = (index, e) => {
+    if (e.key === 'Backspace' && !otpDigits[index] && index > 0) {
+      otpRefs.current[index - 1]?.focus();
+    }
+  };
+
+  const handleOtpPaste = (e) => {
+    const pasted = e.clipboardData.getData('text').replace(/\D/g, '').slice(0, 6);
+    if (!pasted) return;
+    e.preventDefault();
+    const updated = ['', '', '', '', '', ''];
+    for (let i = 0; i < pasted.length; i++) {
+      updated[i] = pasted[i];
+    }
+    setOtpDigits(updated);
+    otpRefs.current[Math.min(pasted.length, 5)]?.focus();
   };
 
   const validateDetails = () => {
@@ -128,18 +157,18 @@ export default function EmbeddedAuthCard({ onAuthenticated }) {
     const existing = accounts[cleanedEmail];
 
     if (mode === 'signup' && existing) {
-      setError('An account with this email already exists. Sign in or reset your password.');
+      setError('This email is already registered. Switch to Login or reset your password.');
       return;
     }
 
     if (mode === 'login') {
       if (!existing) {
-        setError('No account found for this email. Switch to Create Account to register.');
+        setError('No account found for this email. Switch to Create Account to sign up.');
         return;
       }
       const enteredHash = await hashPassword(cleanedEmail, password);
       if (enteredHash !== existing.passwordHash) {
-        setError('Incorrect password. Try again or click "Forgot password?".');
+        setError('Incorrect password. Try again or use Forgot Password.');
         return;
       }
     }
@@ -170,20 +199,22 @@ export default function EmbeddedAuthCard({ onAuthenticated }) {
 
       const contentType = res.headers.get('content-type') || '';
       if (!contentType.includes('application/json')) {
-        throw new Error('Authentication service unavailable. Please try again shortly.');
+        throw new Error('Email OTP service is unavailable right now. Please try again.');
       }
 
       const data = await res.json();
       if (!res.ok) {
-        throw new Error(data.detail || 'Unable to send verification email.');
+        throw new Error(data.detail || 'Could not send verification email.');
       }
 
       setChallenge(data.challenge || '');
+      setOtpDigits(['', '', '', '', '', '']);
       setStep('otp');
       setSecondsLeft(300);
       setResendCooldown(30);
+      setTimeout(() => otpRefs.current[0]?.focus(), 100);
     } catch (err) {
-      setError(err.message || 'Unable to send verification code right now.');
+      setError(err.message || 'Unable to dispatch OTP email.');
     } finally {
       setLoading(false);
     }
@@ -191,13 +222,13 @@ export default function EmbeddedAuthCard({ onAuthenticated }) {
 
   const handleVerifyOtp = async (e) => {
     e?.preventDefault();
-    const code = otpInput.replace(/\D/g, '');
+    const code = otpDigits.join('');
     if (code.length !== 6) {
-      setError('Enter the 6-digit verification code sent to your email.');
+      setError('Enter all 6 digits of the OTP sent to your email.');
       return;
     }
     if (secondsLeft <= 0) {
-      setError('This OTP has expired. Click Resend OTP to get a new code.');
+      setError('OTP expired. Click Resend OTP to generate a fresh code.');
       return;
     }
     if (mode === 'forgot') {
@@ -258,10 +289,10 @@ export default function EmbeddedAuthCard({ onAuthenticated }) {
         });
         setPassword('');
         setConfirmPassword('');
-        setOtpInput('');
+        setOtpDigits(['', '', '', '', '', '']);
         setMode('login');
         setStep('details');
-        setSuccessMsg('Password updated successfully. You can now sign in with your new password.');
+        setSuccessMsg('Password reset successful. Sign in with your new password.');
       } else {
         onAuthenticated?.({
           token: data.access_token,
@@ -271,7 +302,7 @@ export default function EmbeddedAuthCard({ onAuthenticated }) {
         });
       }
     } catch (err) {
-      setError(err.message || 'Verification failed. Check your 6-digit code and try again.');
+      setError(err.message || 'Verification failed. Check your 6-digit OTP.');
     } finally {
       setLoading(false);
     }
@@ -281,7 +312,8 @@ export default function EmbeddedAuthCard({ onAuthenticated }) {
   const secs = String(secondsLeft % 60).padStart(2, '0');
 
   return (
-    <div className="rounded-3xl bg-white border border-slate-200 shadow-xl p-6 sm:p-7 text-slate-900 w-full">
+    <div className="rounded-3xl bg-white border border-slate-200 shadow-2xl p-6 sm:p-7 text-slate-900 w-full">
+      {/* Login / Create Account Tabs */}
       {mode !== 'forgot' && (
         <div className="grid grid-cols-2 gap-1 p-1 rounded-full bg-slate-100 border border-slate-200 mb-6">
           <button
@@ -311,22 +343,25 @@ export default function EmbeddedAuthCard({ onAuthenticated }) {
         </div>
       )}
 
-      <h2 className="text-xl font-bold text-slate-900">
-        {mode === 'signup'
-          ? 'Create Your Account'
-          : mode === 'forgot'
-          ? 'Reset Your Password'
-          : 'Welcome back, Traveller'}
-      </h2>
-      <p className="text-xs text-slate-500 mt-1 mb-5">
-        {mode === 'signup'
-          ? 'Register with your email and verify via 6-digit OTP.'
-          : mode === 'forgot'
-          ? 'Enter your registered email to receive a password reset OTP.'
-          : 'Sign in with your registered email, password, and 2-step Email OTP.'}
-      </p>
+      {/* Header */}
+      <div className="mb-5">
+        <h2 className="text-xl font-bold text-slate-900">
+          {mode === 'signup'
+            ? 'New User Sign Up'
+            : mode === 'forgot'
+            ? 'Forgot Password'
+            : 'Welcome back, Traveller'}
+        </h2>
+        <p className="text-xs text-slate-500 mt-1">
+          {mode === 'signup'
+            ? 'Create your RailYatra 3D account and verify with a real-time Email OTP.'
+            : mode === 'forgot'
+            ? 'Verify your registered email via OTP to set a new password.'
+            : 'Sign in with your email, password, and real-time 6-digit Email OTP.'}
+        </p>
+      </div>
 
-      {/* 3 Clean RBAC Roles */}
+      {/* Role Selector */}
       <div className="mb-5">
         <label className="block text-[11px] font-bold uppercase tracking-wider text-slate-500 mb-2">
           Select Access Portal
@@ -374,7 +409,7 @@ export default function EmbeddedAuthCard({ onAuthenticated }) {
                   required
                   value={name}
                   onChange={(e) => setName(e.target.value)}
-                  placeholder="e.g. Shaik Sameer"
+                  placeholder="Enter your full name"
                   className="w-full rounded-xl bg-slate-50 border border-slate-200 focus:border-blue-600 focus:bg-white pl-10 pr-4 py-3 text-sm text-slate-900 outline-none transition"
                 />
               </div>
@@ -392,7 +427,7 @@ export default function EmbeddedAuthCard({ onAuthenticated }) {
                 required
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
-                placeholder="name@gmail.com"
+                placeholder="you@gmail.com"
                 className="w-full rounded-xl bg-slate-50 border border-slate-200 focus:border-blue-600 focus:bg-white pl-10 pr-4 py-3 text-sm text-slate-900 outline-none transition"
               />
             </div>
@@ -469,12 +504,12 @@ export default function EmbeddedAuthCard({ onAuthenticated }) {
             className="w-full rounded-full bg-gradient-to-r from-blue-600 to-blue-500 hover:from-blue-700 hover:to-blue-600 text-white font-semibold py-3.5 text-sm shadow-md flex items-center justify-center gap-2 transition active:scale-95 disabled:opacity-60"
           >
             {loading
-              ? 'Sending Verification Email...'
+              ? 'Generating & Sending OTP...'
               : mode === 'forgot'
-              ? 'Send Password Reset OTP'
+              ? 'Send Reset OTP to Email'
               : mode === 'signup'
-              ? 'Send Email Verification OTP'
-              : 'Continue with Email OTP'}
+              ? 'Send Sign Up OTP to Email'
+              : 'Send Login OTP to Email'}
             <ArrowRight className="w-4 h-4" />
           </button>
 
@@ -494,31 +529,34 @@ export default function EmbeddedAuthCard({ onAuthenticated }) {
           <div className="rounded-xl bg-blue-50 border border-blue-200 p-3.5 text-xs text-blue-900">
             <div className="font-bold flex items-center gap-1.5">
               <Mail className="w-3.5 h-3.5 text-blue-600" />
-              Verification code sent to {email.trim().toLowerCase()}
+              OTP emailed to {email.trim().toLowerCase()}
             </div>
             <p className="mt-1 text-blue-800">
-              Check your Inbox or Spam folder and enter the 6-digit code below.
+              Enter the 6-digit code from your Inbox or Spam folder.
             </p>
           </div>
 
           <div>
-            <div className="flex items-center justify-between mb-1.5">
-              <label className="text-xs font-semibold text-slate-700">Enter 6-Digit Email OTP</label>
+            <div className="flex items-center justify-between mb-2">
+              <label className="text-xs font-semibold text-slate-700">6-Digit Email OTP</label>
               <span className="text-xs font-mono font-semibold text-blue-700">
                 Expires in {mins}:{secs}
               </span>
             </div>
-            <div className="relative">
-              <KeyRound className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
-              <input
-                type="text"
-                maxLength={6}
-                value={otpInput}
-                onChange={(e) => setOtpInput(e.target.value.replace(/\D/g, ''))}
-                placeholder="000000"
-                autoFocus
-                className="w-full rounded-xl bg-slate-50 border border-slate-300 focus:border-blue-600 focus:bg-white pl-10 pr-4 py-3 text-base font-mono tracking-[0.35em] text-slate-900 outline-none transition"
-              />
+            <div className="grid grid-cols-6 gap-2" onPaste={handleOtpPaste}>
+              {otpDigits.map((digit, idx) => (
+                <input
+                  key={idx}
+                  ref={(el) => (otpRefs.current[idx] = el)}
+                  type="text"
+                  inputMode="numeric"
+                  maxLength={1}
+                  value={digit}
+                  onChange={(e) => handleOtpChange(idx, e.target.value)}
+                  onKeyDown={(e) => handleOtpKeyDown(idx, e)}
+                  className="w-full h-12 text-center text-lg font-mono font-bold rounded-xl bg-slate-50 border border-slate-300 focus:border-blue-600 focus:bg-white focus:ring-2 focus:ring-blue-100 text-slate-900 outline-none transition"
+                />
+              ))}
             </div>
           </div>
 
@@ -582,9 +620,9 @@ export default function EmbeddedAuthCard({ onAuthenticated }) {
             className="w-full rounded-full bg-gradient-to-r from-blue-600 to-blue-500 hover:from-blue-700 hover:to-blue-600 text-white font-semibold py-3.5 text-sm shadow-md flex items-center justify-center gap-2 transition active:scale-95 disabled:opacity-60"
           >
             {loading
-              ? 'Verifying...'
+              ? 'Verifying OTP...'
               : mode === 'forgot'
-              ? 'Verify OTP & Reset Password'
+              ? 'Verify OTP & Update Password'
               : mode === 'signup'
               ? 'Verify OTP & Create Account'
               : 'Verify OTP & Sign In'}
@@ -596,7 +634,7 @@ export default function EmbeddedAuthCard({ onAuthenticated }) {
               type="button"
               onClick={() => {
                 setStep('details');
-                setOtpInput('');
+                setOtpDigits(['', '', '', '', '', '']);
                 setError('');
               }}
               className="text-slate-600 hover:text-slate-900 font-medium"
@@ -619,7 +657,7 @@ export default function EmbeddedAuthCard({ onAuthenticated }) {
       <div className="mt-5 pt-4 border-t border-slate-100 flex items-center justify-between text-[11px] text-slate-500">
         <span className="flex items-center gap-1">
           <Lock className="w-3 h-3 text-emerald-600" />
-          2-Step Email OTP Protected
+          Real-Time Email OTP
         </span>
         <span>HMAC-SHA256 Verified</span>
       </div>
