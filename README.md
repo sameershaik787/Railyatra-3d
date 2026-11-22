@@ -21,6 +21,8 @@
 | **3D Graphics Engine** | Three.js (`THREE.LOD`, WebGLRenderer) |
 | **Backend API** | Python, FastAPI, Uvicorn, Pydantic, `python-dotenv` |
 | **Version Control ** | Git, GitHub|
+Deployed live website : https://railyatra3d.netlify.app/
+
 
 ## API Keys & Data Sources
 No paid third-party API key is required to run this project. RailYatra 3D uses a custom **FastAPI** backend for RBAC authentication and PNR booking logic alongside structured local datasets (`railData.js`) so the app stays zero-cost and reliable during live demos. Live IRCTC/RapidAPI keys can optionally be added later via `backend/.env`.
