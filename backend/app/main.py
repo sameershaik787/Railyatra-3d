@@ -4,7 +4,7 @@ from pydantic import BaseModel
 from typing import List, Optional, Dict, Any
 import random
 
-app = FastAPI(title="RailYatra 3D API", version="1.1.0")
+app = FastAPI(title="RailYatra 3D API", version="1.2.0")
 
 app.add_middleware(
     CORSMiddleware,
@@ -14,14 +14,13 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# In-memory stores (replace with PostgreSQL / MongoDB in production)
 BOOKINGS: Dict[str, dict] = {}
 FOOD_ORDERS: Dict[str, dict] = {}
 
 class LoginRequest(BaseModel):
     email: str
     password: str
-    role: str = "passenger"  # passenger | tte | admin
+    role: str = "passenger"
 
 class BookingRequest(BaseModel):
     train_number: str
@@ -34,8 +33,13 @@ class FoodOrderRequest(BaseModel):
     pnr: str
     station_code: str
     coach_berth: str
+    partners: List[str] = ["Swiggy"]
+    mobile_number: Optional[str] = None
     items: List[Dict[str, Any]]
     total_amount: float
+
+class MobileUpdateRequest(BaseModel):
+    mobile_number: str
 
 @app.get("/api/health")
 def health_check():
@@ -71,6 +75,8 @@ def get_food_route_by_pnr(pnr: str):
         "pnr": pnr,
         "train_number": booking["train_number"] if booking else "12952",
         "coach": booking["coach"] if booking else "B4",
+        "live_speed_kmph": 118,
+        "gps_lock": True,
         "upcoming_stations": [
             {"code": "KOTA", "name": "Kota Jn", "eta": "21:35", "halt_mins": 10},
             {"code": "RTM", "name": "Ratlam Jn", "eta": "00:40", "halt_mins": 5},
@@ -84,11 +90,19 @@ def place_food_order(payload: FoodOrderRequest):
     order_id = f"RYF{random.randint(100000, 999999)}"
     record = {
         "order_id": order_id,
-        "status": "PREPARING_AT_STATION",
+        "status": "AWAITING_MOBILE" if not payload.mobile_number else "PREPARING_AT_STATION",
         **payload.model_dump(),
     }
     FOOD_ORDERS[order_id] = record
     return record
+
+@app.patch("/api/food/orders/{order_id}/mobile")
+def attach_mobile_number(order_id: str, payload: MobileUpdateRequest):
+    if order_id not in FOOD_ORDERS:
+        raise HTTPException(status_code=404, detail="Food order not found")
+    FOOD_ORDERS[order_id]["mobile_number"] = payload.mobile_number
+    FOOD_ORDERS[order_id]["status"] = "PREPARING_AT_STATION"
+    return FOOD_ORDERS[order_id]
 
 @app.get("/api/food/orders/{order_id}")
 def track_food_order(order_id: str):
