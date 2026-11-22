@@ -11,7 +11,7 @@ import {
   Train,
 } from 'lucide-react';
 
-const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:8000';
+const API_BASE = (import.meta.env.VITE_API_URL || 'http://localhost:8000').replace(/\/+$/, '');
 const DISPOSABLE_DOMAINS = [
   'mailinator.com',
   'tempmail.com',
@@ -22,16 +22,16 @@ const DISPOSABLE_DOMAINS = [
 ];
 
 const ROLES = [
-  { id: 'passenger', label: 'Passenger', desc: '3D Berth Booking & Food on Train' },
-  { id: 'tte', label: 'TTE Staff', desc: 'Onboard Coach & PNR Verification' },
-  { id: 'admin', label: 'Railway Admin', desc: 'Fleet, Staff & Partner Resource Ops' },
+  { id: 'passenger', label: 'Passenger' },
+  { id: 'tte', label: 'TTE Staff' },
+  { id: 'admin', label: 'Railway Admin' },
 ];
 
 export default function AuthGate({ onAuthenticated }) {
   const [role, setRole] = useState('passenger');
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
-  const [step, setStep] = useState('email'); // email | otp
+  const [step, setStep] = useState('email');
   const [otpInput, setOtpInput] = useState('');
   const [localFallbackOtp, setLocalFallbackOtp] = useState('');
   const [deliveryInfo, setDeliveryInfo] = useState('');
@@ -87,21 +87,20 @@ export default function AuthGate({ onAuthenticated }) {
       }
 
       if (data.delivery_mode === 'email') {
-        setDeliveryInfo(`A 6-digit verification code has been emailed to ${cleanedEmail}.`);
+        setDeliveryInfo(`A 6-digit verification code has been emailed to ${cleanedEmail}. Check Inbox or Spam.`);
       } else {
         setLocalFallbackOtp(data.preview_otp || '');
         setDeliveryInfo(
-          `SMTP credentials are not configured on the backend yet. Test OTP for ${cleanedEmail}: ${data.preview_otp}`
+          `Backend SMTP is not configured yet. Temporary verification code for ${cleanedEmail}: ${data.preview_otp}`
         );
       }
       setStep('otp');
       setSecondsLeft(300);
     } catch (err) {
-      // Fallback if backend on Render is sleeping/offline so login remains usable
       const generated = String(Math.floor(100000 + Math.random() * 900000));
       setLocalFallbackOtp(generated);
       setDeliveryInfo(
-        `Auth server unreachable (${API_BASE}). Local verification code for ${cleanedEmail}: ${generated}`
+        `Auth server unreachable (${API_BASE}). Set VITE_API_URL in Netlify to enable email OTP. Temporary code: ${generated}`
       );
       setStep('otp');
       setSecondsLeft(300);
@@ -182,7 +181,6 @@ export default function AuthGate({ onAuthenticated }) {
 
       <div className="max-w-lg w-full mx-auto px-4 -mt-16 pb-12">
         <div className="rounded-2xl bg-white border border-slate-200 shadow-lg p-6 sm:p-8">
-          {/* Role Selection */}
           <div className="mb-6">
             <label className="block text-[11px] font-bold uppercase tracking-wider text-slate-500 mb-2">
               Select Access Portal
@@ -196,14 +194,13 @@ export default function AuthGate({ onAuthenticated }) {
                     type="button"
                     disabled={step === 'otp'}
                     onClick={() => setRole(item.id)}
-                    className={`rounded-xl p-3 text-left border transition ${
+                    className={`rounded-xl px-3 py-3 text-center border transition ${
                       active
                         ? 'bg-blue-50 border-blue-600 text-blue-800 shadow-xs'
                         : 'bg-slate-50 border-slate-200 text-slate-700 hover:border-blue-300'
                     } ${step === 'otp' ? 'opacity-65 cursor-not-allowed' : ''}`}
                   >
                     <div className="text-xs font-bold">{item.label}</div>
-                    <div className="text-[10px] text-slate-500 mt-0.5 leading-snug">{item.desc}</div>
                   </button>
                 );
               })}
