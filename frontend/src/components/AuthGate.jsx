@@ -5,10 +5,14 @@ import {
   KeyRound,
   ShieldCheck,
   ArrowRight,
+  ArrowLeft,
   RefreshCw,
   UserCheck,
   AlertCircle,
+  CheckCircle2,
   Lock,
+  Eye,
+  EyeOff,
   Train,
 } from 'lucide-react';
 
@@ -27,15 +31,54 @@ const ROLES = [
   { id: 'admin', label: 'Railway Admin' },
 ];
 
+const PWD_STORAGE_KEY = 'railyatra_pwd_hashes_v1';
+
+async function hashSecret(mobile, pwd) {
+  const raw = `${mobile}:${pwd}:railyatra3d`;
+  if (typeof window !== 'undefined' && window.crypto?.subtle) {
+    const buf = await window.crypto.subtle.digest('SHA-256', new TextEncoder().encode(raw));
+    return Array.from(new Uint8Array(buf))
+      .map((b) => b.toString(16).padStart(2, '0'))
+      .join('');
+  }
+  return btoa(raw);
+}
+
+function loadSavedHashes() {
+  try {
+    return JSON.parse(localStorage.getItem(PWD_STORAGE_KEY) || '{}');
+  } catch {
+    return {};
+  }
+}
+
+function saveHashForMobile(mobile, hash) {
+  try {
+    const all = loadSavedHashes();
+    all[mobile] = hash;
+    localStorage.setItem(PWD_STORAGE_KEY, JSON.stringify(all));
+  } catch {}
+}
+
 export default function AuthGate({ onAuthenticated }) {
+  const [mode, setMode] = useState('login'); // login | forgot
   const [role, setRole] = useState('passenger');
   const [name, setName] = useState('');
   const [mobile, setMobile] = useState('');
   const [email, setEmail] = useState('');
-  const [step, setStep] = useState('details');
+  const [password, setPassword] = useState('');
+  const [showPassword, setShowPassword] = useState(false);
+
+  const [newPassword, setNewPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
+  const [showNewPassword, setShowNewPassword] = useState(false);
+
+  const [step, setStep] = useState('details'); // details | otp
   const [otpInput, setOtpInput] = useState('');
   const [challenge, setChallenge] = useState('');
+  const [previewOtp, setPreviewOtp] = useState('');
   const [deliveryInfo, setDeliveryInfo] = useState('');
+  const [successMsg, setSuccessMsg] = useState('');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
   const [secondsLeft, setSecondsLeft] = useState(0);
@@ -48,7 +91,7 @@ export default function AuthGate({ onAuthenticated }) {
     return () => clearInterval(timer);
   }, [secondsLeft]);
 
-  const validateInputs = () => {
+  const validateBaseInputs = (requirePassword) => {
     const cleanedMobile = mobile.replace(/\D/g, '');
     if (!/^[6-9]\d{9}$/.test(cleanedMobile)) {
       return 'Enter a valid 10-digit Indian mobile number starting with 6-9.';
@@ -62,24 +105,44 @@ export default function AuthGate({ onAuthenticated }) {
         return 'Temporary or disposable email domains are blocked. Use a genuine email ID or leave it optional.';
       }
     }
+    if (requirePassword && password.length < 6) {
+      return 'Password must be at least 6 characters.';
+    }
     return '';
   };
 
   const handleSendOtp = async (e) => {
     e?.preventDefault();
-    const validationErr = validateInputs();
+    const isReset = mode === 'forgot';
+    const validationErr = validateBaseInputs(!isReset);
     if (validationErr) {
       setError(validationErr);
       return;
     }
 
-    setError('');
-    setLoading(true);
-    setDeliveryInfo('');
-
     const cleanedMobile = mobile.replace(/\D/g, '');
     const cleanedEmail = email.trim().toLowerCase();
-    const displayName = name.trim() || (cleanedEmail ? cleanedEmail.split('@')[0] : `Passenger ${cleanedMobile.slice(-4)}`);
+
+    // Verify existing password if user already registered/reset one for this mobile
+    if (!isReset) {
+      const saved = loadSavedHashes();
+      if (saved[cleanedMobile]) {
+        const enteredHash = await hashSecret(cleanedMobile, password);
+        if (enteredHash !== saved[cleanedMobile]) {
+          setError('Incorrect password for this mobile number. Click "Forgot password?" to reset it.');
+          return;
+        }
+      }
+    }
+
+    setError('');
+    setSuccessMsg('');
+    setLoading(true);
+    setDeliveryInfo('');
+    setPreviewOtp('');
+
+    const displayName =
+      name.trim() || (cleanedEmail ? cleanedEmail.split('@')[0] : `Passenger ${cleanedMobile.slice(-4)}`);
 
     try {
       const res = await fetch('/.netlify/functions/send-otp', {
@@ -90,6 +153,7 @@ export default function AuthGate({ onAuthenticated }) {
           email: cleanedEmail,
           name: displayName,
           role,
+          purpose: isReset ? 'reset' : 'login',
         }),
       });
 
@@ -105,15 +169,16 @@ export default function AuthGate({ onAuthenticated }) {
 
       setChallenge(data.challenge || '');
       if (data.sent_via_sms && data.sent_via_email) {
-        setDeliveryInfo(`A 6-digit verification code has been sent via SMS to ${data.mobile} and emailed to ${cleanedEmail}.`);
+        setDeliveryInfo(`6-digit OTP sent via SMS to ${data.mobile} and emailed to ${cleanedEmail}.`);
       } else if (data.sent_via_sms) {
-        setDeliveryInfo(`A 6-digit verification code has been sent via SMS to ${data.mobile}.`);
+        setDeliveryInfo(`6-digit OTP sent via SMS to ${data.mobile}.`);
       } else if (data.sent_via_email) {
-        setDeliveryInfo(`A 6-digit verification code has been emailed to ${cleanedEmail}. Check your Inbox or Spam folder.`);
+        setDeliveryInfo(`6-digit OTP emailed to ${cleanedEmail}. Check your Inbox or Spam folder.`);
       } else {
-        const target = cleanedEmail ? `${data.mobile} / ${cleanedEmail}` : data.mobile;
+        setPreviewOtp(data.preview_otp || '');
+        const reason = data.sms_note ? ` (${data.sms_note})` : '';
         setDeliveryInfo(
-          `Verification OTP generated for ${target}: ${data.preview_otp}`
+          `SMS gateway not configured on Netlify${reason}. Use this instant verification OTP for ${data.mobile}:`
         );
       }
 
@@ -128,6 +193,7 @@ export default function AuthGate({ onAuthenticated }) {
 
   const handleVerifyOtp = async (e) => {
     e?.preventDefault();
+    const isReset = mode === 'forgot';
     const code = otpInput.replace(/\D/g, '');
     if (code.length !== 6) {
       setError('Enter the 6-digit verification OTP.');
@@ -136,6 +202,16 @@ export default function AuthGate({ onAuthenticated }) {
     if (secondsLeft <= 0) {
       setError('This OTP has expired. Click Resend OTP to get a new code.');
       return;
+    }
+    if (isReset) {
+      if (newPassword.length < 6) {
+        setError('New password must be at least 6 characters.');
+        return;
+      }
+      if (newPassword !== confirmPassword) {
+        setError('New password and Confirm password do not match.');
+        return;
+      }
     }
 
     setError('');
@@ -159,10 +235,26 @@ export default function AuthGate({ onAuthenticated }) {
       if (!res.ok) {
         throw new Error(data.detail || 'Invalid OTP code.');
       }
-      onAuthenticated({
-        token: data.access_token,
-        ...data.user,
-      });
+
+      if (isReset) {
+        const newHash = await hashSecret(cleanedMobile, newPassword);
+        saveHashForMobile(cleanedMobile, newHash);
+        setPassword('');
+        setNewPassword('');
+        setConfirmPassword('');
+        setOtpInput('');
+        setPreviewOtp('');
+        setMode('login');
+        setStep('details');
+        setSuccessMsg('Password reset successful. Sign in with your new password.');
+      } else {
+        const pwdHash = await hashSecret(cleanedMobile, password);
+        saveHashForMobile(cleanedMobile, pwdHash);
+        onAuthenticated({
+          token: data.access_token,
+          ...data.user,
+        });
+      }
     } catch (err) {
       setError(err.message || 'Verification failed. Double-check your 6-digit OTP.');
     } finally {
@@ -170,9 +262,21 @@ export default function AuthGate({ onAuthenticated }) {
     }
   };
 
+  const switchMode = (nextMode) => {
+    setMode(nextMode);
+    setStep('details');
+    setOtpInput('');
+    setPreviewOtp('');
+    setError('');
+    setSuccessMsg('');
+    setNewPassword('');
+    setConfirmPassword('');
+  };
+
   const mins = String(Math.floor(secondsLeft / 60)).padStart(2, '0');
   const secs = String(secondsLeft % 60).padStart(2, '0');
-  const formattedMobile = mobile.length === 10 ? `+91 ${mobile.slice(0, 5)} ${mobile.slice(5)}` : `+91 ${mobile}`;
+  const formattedMobile =
+    mobile.length === 10 ? `+91 ${mobile.slice(0, 5)} ${mobile.slice(5)}` : `+91 ${mobile}`;
 
   return (
     <div className="min-h-[calc(100vh-56px)] bg-[#f2f5fa] flex flex-col">
@@ -183,10 +287,12 @@ export default function AuthGate({ onAuthenticated }) {
             Verified Mobile & Email OTP Identity Gateway
           </div>
           <h1 className="text-2xl sm:text-3xl font-bold text-white tracking-tight">
-            Sign in to RailYatra 3D
+            {mode === 'forgot' ? 'Reset Your Password' : 'Sign in to RailYatra 3D'}
           </h1>
           <p className="text-blue-200 text-sm mt-1.5">
-            Verify your identity via Mobile or Email OTP to access 3D berth reservations, live PNR catering, or railway operations.
+            {mode === 'forgot'
+              ? 'Verify your mobile number or email via OTP to set a new password.'
+              : 'Verify your identity via Mobile or Email OTP to access 3D berth reservations, live PNR catering, or railway operations.'}
           </p>
         </div>
       </div>
@@ -219,23 +325,32 @@ export default function AuthGate({ onAuthenticated }) {
             </div>
           </div>
 
+          {successMsg && (
+            <div className="mb-4 rounded-xl bg-emerald-50 border border-emerald-200 px-3.5 py-2.5 text-xs font-medium text-emerald-800 flex items-center gap-2">
+              <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+              {successMsg}
+            </div>
+          )}
+
           {step === 'details' ? (
             <form onSubmit={handleSendOtp} className="space-y-4">
-              <div>
-                <label className="block text-xs font-semibold text-slate-700 mb-1.5">
-                  Full Name
-                </label>
-                <div className="relative">
-                  <UserCheck className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
-                  <input
-                    type="text"
-                    value={name}
-                    onChange={(e) => setName(e.target.value)}
-                    placeholder="e.g. Shaik Sameer"
-                    className="w-full rounded-xl bg-slate-50 border border-slate-200 focus:border-blue-600 focus:bg-white pl-10 pr-4 py-3 text-sm text-slate-900 outline-none transition"
-                  />
+              {mode === 'login' && (
+                <div>
+                  <label className="block text-xs font-semibold text-slate-700 mb-1.5">
+                    Full Name
+                  </label>
+                  <div className="relative">
+                    <UserCheck className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
+                    <input
+                      type="text"
+                      value={name}
+                      onChange={(e) => setName(e.target.value)}
+                      placeholder="e.g. Shaik Sameer"
+                      className="w-full rounded-xl bg-slate-50 border border-slate-200 focus:border-blue-600 focus:bg-white pl-10 pr-4 py-3 text-sm text-slate-900 outline-none transition"
+                    />
+                  </div>
                 </div>
-              </div>
+              )}
 
               <div>
                 <label className="block text-xs font-semibold text-slate-700 mb-1.5">
@@ -260,9 +375,7 @@ export default function AuthGate({ onAuthenticated }) {
 
               <div>
                 <div className="flex items-center justify-between mb-1.5">
-                  <label className="text-xs font-semibold text-slate-700">
-                    Email ID
-                  </label>
+                  <label className="text-xs font-semibold text-slate-700">Email ID</label>
                   <span className="text-[11px] font-medium text-slate-400">Optional</span>
                 </div>
                 <div className="relative">
@@ -275,11 +388,44 @@ export default function AuthGate({ onAuthenticated }) {
                     className="w-full rounded-xl bg-slate-50 border border-slate-200 focus:border-blue-600 focus:bg-white pl-10 pr-4 py-3 text-sm text-slate-900 outline-none transition"
                   />
                 </div>
-                <p className="text-[11px] text-slate-500 mt-1.5 flex items-center gap-1">
-                  <Lock className="w-3 h-3 text-emerald-600" />
-                  Add an email to also receive OTP and booking updates in your inbox.
-                </p>
               </div>
+
+              {mode === 'login' && (
+                <div>
+                  <div className="flex items-center justify-between mb-1.5">
+                    <label className="text-xs font-semibold text-slate-700">
+                      Password <span className="text-rose-600">*</span>
+                    </label>
+                    <button
+                      type="button"
+                      onClick={() => switchMode('forgot')}
+                      className="text-xs font-semibold text-blue-600 hover:text-blue-800 transition"
+                    >
+                      Forgot password?
+                    </button>
+                  </div>
+                  <div className="relative">
+                    <Lock className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
+                    <input
+                      type={showPassword ? 'text' : 'password'}
+                      required
+                      minLength={6}
+                      value={password}
+                      onChange={(e) => setPassword(e.target.value)}
+                      placeholder="Enter password (min 6 characters)"
+                      className="w-full rounded-xl bg-slate-50 border border-slate-200 focus:border-blue-600 focus:bg-white pl-10 pr-11 py-3 text-sm text-slate-900 outline-none transition"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setShowPassword((v) => !v)}
+                      className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-700"
+                      aria-label="Toggle password visibility"
+                    >
+                      {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                    </button>
+                  </div>
+                </div>
+              )}
 
               {error && (
                 <div className="rounded-xl bg-rose-50 border border-rose-200 px-3.5 py-2.5 text-xs font-medium text-rose-700 flex items-center gap-2">
@@ -293,18 +439,48 @@ export default function AuthGate({ onAuthenticated }) {
                 disabled={loading}
                 className="w-full rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-semibold py-3.5 text-sm shadow-sm flex items-center justify-center gap-2 transition active:scale-95 disabled:opacity-60"
               >
-                {loading ? 'Generating Verification OTP...' : 'Send Verification OTP'}
+                {loading
+                  ? 'Sending OTP...'
+                  : mode === 'forgot'
+                  ? 'Send Password Reset OTP'
+                  : 'Send Verification OTP'}
                 <ArrowRight className="w-4 h-4" />
               </button>
+
+              {mode === 'forgot' && (
+                <button
+                  type="button"
+                  onClick={() => switchMode('login')}
+                  className="w-full flex items-center justify-center gap-1.5 text-xs font-semibold text-slate-600 hover:text-slate-900 pt-1"
+                >
+                  <ArrowLeft className="w-3.5 h-3.5" />
+                  Back to Sign In
+                </button>
+              )}
             </form>
           ) : (
             <form onSubmit={handleVerifyOtp} className="space-y-4">
               <div className="rounded-xl bg-blue-50 border border-blue-200 p-3.5 text-xs text-blue-800">
                 <div className="font-bold flex items-center gap-1.5">
                   <Phone className="w-3.5 h-3.5 text-blue-600" />
-                  OTP Ready for {formattedMobile}{email.trim() ? ` (${email.trim().toLowerCase()})` : ''}
+                  {mode === 'forgot' ? 'Reset OTP' : 'OTP'} for {formattedMobile}
+                  {email.trim() ? ` (${email.trim().toLowerCase()})` : ''}
                 </div>
                 <p className="mt-1 text-blue-700">{deliveryInfo}</p>
+                {previewOtp && (
+                  <div className="mt-2.5 flex items-center justify-between gap-2 rounded-lg bg-white border border-blue-200 px-3 py-2">
+                    <span className="font-mono text-base font-bold tracking-[0.25em] text-blue-700">
+                      {previewOtp}
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => setOtpInput(previewOtp)}
+                      className="text-[11px] font-semibold px-2.5 py-1 rounded-md bg-blue-600 hover:bg-blue-700 text-white transition"
+                    >
+                      Auto-fill OTP
+                    </button>
+                  </div>
+                )}
               </div>
 
               <div>
@@ -330,6 +506,53 @@ export default function AuthGate({ onAuthenticated }) {
                 </div>
               </div>
 
+              {mode === 'forgot' && (
+                <>
+                  <div>
+                    <label className="block text-xs font-semibold text-slate-700 mb-1.5">
+                      New Password
+                    </label>
+                    <div className="relative">
+                      <Lock className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
+                      <input
+                        type={showNewPassword ? 'text' : 'password'}
+                        required
+                        minLength={6}
+                        value={newPassword}
+                        onChange={(e) => setNewPassword(e.target.value)}
+                        placeholder="Minimum 6 characters"
+                        className="w-full rounded-xl bg-slate-50 border border-slate-200 focus:border-blue-600 focus:bg-white pl-10 pr-11 py-3 text-sm text-slate-900 outline-none transition"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => setShowNewPassword((v) => !v)}
+                        className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-700"
+                      >
+                        {showNewPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                      </button>
+                    </div>
+                  </div>
+
+                  <div>
+                    <label className="block text-xs font-semibold text-slate-700 mb-1.5">
+                      Confirm New Password
+                    </label>
+                    <div className="relative">
+                      <Lock className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
+                      <input
+                        type={showNewPassword ? 'text' : 'password'}
+                        required
+                        minLength={6}
+                        value={confirmPassword}
+                        onChange={(e) => setConfirmPassword(e.target.value)}
+                        placeholder="Re-enter new password"
+                        className="w-full rounded-xl bg-slate-50 border border-slate-200 focus:border-blue-600 focus:bg-white pl-10 pr-4 py-3 text-sm text-slate-900 outline-none transition"
+                      />
+                    </div>
+                  </div>
+                </>
+              )}
+
               {error && (
                 <div className="rounded-xl bg-rose-50 border border-rose-200 px-3.5 py-2.5 text-xs font-medium text-rose-700 flex items-center gap-2">
                   <AlertCircle className="w-4 h-4 shrink-0" />
@@ -342,7 +565,11 @@ export default function AuthGate({ onAuthenticated }) {
                 disabled={loading}
                 className="w-full rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-semibold py-3.5 text-sm shadow-sm flex items-center justify-center gap-2 transition active:scale-95 disabled:opacity-60"
               >
-                {loading ? 'Verifying Identity...' : 'Verify OTP & Enter Portal'}
+                {loading
+                  ? 'Verifying...'
+                  : mode === 'forgot'
+                  ? 'Verify OTP & Reset Password'
+                  : 'Verify OTP & Enter Portal'}
                 <ShieldCheck className="w-4 h-4" />
               </button>
 

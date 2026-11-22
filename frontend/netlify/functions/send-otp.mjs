@@ -20,6 +20,7 @@ export default async (req) => {
     const rawMobile = String(body.mobile || '').replace(/\D/g, '');
     const email = String(body.email || '').trim().toLowerCase();
     const role = String(body.role || 'passenger').trim().toLowerCase();
+    const purpose = body.purpose === 'reset' ? 'reset' : 'login';
     const name = String(body.name || (email ? email.split('@')[0] : `User ${rawMobile.slice(-4)}`)).trim();
 
     if (!/^[6-9]\d{9}$/.test(rawMobile)) {
@@ -46,12 +47,13 @@ export default async (req) => {
     }
 
     const formattedMobile = `+91 ${rawMobile.slice(0, 5)} ${rawMobile.slice(5)}`;
+    const e164Mobile = `+91${rawMobile}`;
     const otp = String(crypto.randomInt(100000, 1000000));
     const expiresAt = Date.now() + 5 * 60 * 1000;
     const secret = process.env.AUTH_SECRET || 'railyatra-3d-netlify-otp-secret';
 
     const payloadB64 = Buffer.from(
-      JSON.stringify({ mobile: rawMobile, formattedMobile, email, role, name, expiresAt }),
+      JSON.stringify({ mobile: rawMobile, formattedMobile, email, role, name, purpose, expiresAt }),
       'utf8'
     ).toString('base64url');
 
@@ -61,36 +63,82 @@ export default async (req) => {
       .digest('hex');
 
     const challenge = `${payloadB64}.${sig}`;
+    const actionLabel = purpose === 'reset' ? 'password reset' : 'sign-in verification';
+    const smsText = `RailYatra 3D: Your ${actionLabel} OTP is ${otp}. Valid for 5 minutes. Do not share this code.`;
 
-    let sentViaEmail = false;
     let sentViaSms = false;
-    let smtpError = '';
+    let sentViaEmail = false;
+    let smsNote = '';
+    let smtpNote = '';
 
-    // 1. Optional real SMS via Fast2SMS if FAST2SMS_API_KEY is set in Netlify
-    const fast2smsKey = (process.env.FAST2SMS_API_KEY || '').trim();
-    if (fast2smsKey) {
+    // 1A. Real Mobile SMS via Twilio (if TWILIO_* env vars are set in Netlify)
+    const twilioSid = (process.env.TWILIO_ACCOUNT_SID || '').trim();
+    const twilioToken = (process.env.TWILIO_AUTH_TOKEN || '').trim();
+    const twilioFrom = (process.env.TWILIO_PHONE_NUMBER || '').trim();
+
+    if (twilioSid && twilioToken && twilioFrom) {
       try {
+        const authHeader = Buffer.from(`${twilioSid}:${twilioToken}`).toString('base64');
+        const params = new URLSearchParams({
+          To: e164Mobile,
+          From: twilioFrom,
+          Body: smsText,
+        });
+        const twRes = await fetch(
+          `https://api.twilio.com/2010-04-01/Accounts/${twilioSid}/Messages.json`,
+          {
+            method: 'POST',
+            headers: {
+              Authorization: `Basic ${authHeader}`,
+              'Content-Type': 'application/x-www-form-urlencoded',
+            },
+            body: params.toString(),
+          }
+        );
+        const twData = await twRes.json().catch(() => ({}));
+        if (twRes.ok && twData.sid) {
+          sentViaSms = true;
+        } else {
+          smsNote = twData.message || 'Twilio SMS rejected';
+        }
+      } catch (err) {
+        smsNote = err?.message || 'Twilio connection error';
+      }
+    }
+
+    // 1B. Real Mobile SMS via Fast2SMS (if FAST2SMS_API_KEY is set and Twilio wasn't used)
+    const fast2smsKey = (process.env.FAST2SMS_API_KEY || '').trim();
+    const fast2smsRoute = (process.env.FAST2SMS_ROUTE || 'q').trim();
+
+    if (!sentViaSms && fast2smsKey) {
+      try {
+        const payload =
+          fast2smsRoute === 'otp'
+            ? { route: 'otp', variables_values: otp, numbers: rawMobile }
+            : { route: 'q', message: smsText, language: 'english', flash: 0, numbers: rawMobile };
+
         const smsRes = await fetch('https://www.fast2sms.com/dev/bulkV2', {
           method: 'POST',
           headers: {
             authorization: fast2smsKey,
             'Content-Type': 'application/json',
           },
-          body: JSON.stringify({
-            route: 'otp',
-            variables_values: otp,
-            numbers: rawMobile,
-          }),
+          body: JSON.stringify(payload),
         });
-        if (smsRes.ok) {
+        const smsData = await smsRes.json().catch(() => ({}));
+        if (smsRes.ok && smsData.return === true) {
           sentViaSms = true;
+        } else {
+          smsNote = Array.isArray(smsData.message)
+            ? smsData.message.join(', ')
+            : smsData.message || 'Fast2SMS rejected request';
         }
-      } catch {
-        // Continue to email or fallback smoothly
+      } catch (err) {
+        smsNote = err?.message || 'Fast2SMS connection error';
       }
     }
 
-    // 2. Real Email delivery for ANY valid recipient email when email is provided & SMTP is configured
+    // 2. Real Email OTP via Gmail/SMTP (for any valid recipient email)
     const smtpUser = (process.env.SMTP_USER || '').trim();
     const smtpPass = (process.env.SMTP_PASS || '').replace(/\s+/g, '');
     const smtpHost = (process.env.SMTP_HOST || 'smtp.gmail.com').trim();
@@ -114,12 +162,15 @@ export default async (req) => {
         await transporter.sendMail({
           from: `"RailYatra 3D Security" <${smtpUser}>`,
           to: email,
-          subject: `RailYatra 3D Verification Code: ${otp}`,
-          text: `Hello ${name},\n\nYour RailYatra 3D one-time verification code is: ${otp}\n\nMobile: ${formattedMobile}\nPortal Role: ${role.toUpperCase()}\nValid for: 5 minutes.`,
+          subject:
+            purpose === 'reset'
+              ? `RailYatra 3D Password Reset OTP: ${otp}`
+              : `RailYatra 3D Verification Code: ${otp}`,
+          text: `Hello ${name},\n\nYour RailYatra 3D ${actionLabel} code is: ${otp}\n\nMobile: ${formattedMobile}\nPortal Role: ${role.toUpperCase()}\nValid for: 5 minutes.`,
           html: `
             <div style="font-family:Segoe UI,Arial,sans-serif;max-width:480px;margin:0 auto;padding:24px;border:1px solid #e2e8f0;border-radius:12px;">
-              <h2 style="color:#07244d;margin:0 0 8px;">RailYatra 3D Verification</h2>
-              <p style="color:#334155;font-size:14px;">Hello ${name}, use the code below to verify your <strong>${role.toUpperCase()}</strong> sign-in for <strong>${formattedMobile}</strong>:</p>
+              <h2 style="color:#07244d;margin:0 0 8px;">RailYatra 3D ${purpose === 'reset' ? 'Password Reset' : 'Verification'}</h2>
+              <p style="color:#334155;font-size:14px;">Hello ${name}, use the code below for your <strong>${role.toUpperCase()}</strong> ${actionLabel} (${formattedMobile}):</p>
               <div style="background:#eff6ff;border:1px solid #bfdbfe;border-radius:10px;padding:16px;text-align:center;margin:20px 0;">
                 <span style="font-size:28px;font-weight:700;letter-spacing:8px;color:#1d4ed8;font-family:monospace;">${otp}</span>
               </div>
@@ -129,7 +180,7 @@ export default async (req) => {
         });
         sentViaEmail = true;
       } catch (err) {
-        smtpError = err?.message || 'SMTP delivery issue';
+        smtpNote = err?.message || 'SMTP delivery issue';
       }
     }
 
@@ -147,9 +198,8 @@ export default async (req) => {
 
     if (!deliveredLive) {
       responsePayload.preview_otp = otp;
-      if (smtpError) {
-        responsePayload.smtp_note = smtpError;
-      }
+      if (smsNote) responsePayload.sms_note = smsNote;
+      if (smtpNote) responsePayload.smtp_note = smtpNote;
     }
 
     return Response.json(responsePayload);
