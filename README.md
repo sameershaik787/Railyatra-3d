@@ -21,7 +21,7 @@
 | **3D Graphics Engine** | Three.js (`THREE.LOD`, WebGLRenderer) |
 | **Backend API** | Python, FastAPI, Uvicorn, Pydantic, `python-dotenv` |
 | **Version Control ** | Git, GitHub|
-Deployed live website : https://railyatra3d.netlify.app/
+|Deployed live website| : | https://railyatra3d.netlify.app/ |
 
 
 ## API Keys & Data Sources
