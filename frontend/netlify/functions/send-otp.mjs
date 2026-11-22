@@ -17,43 +17,42 @@ export default async (req) => {
 
   try {
     const body = await req.json();
-    const rawMobile = String(body.mobile || '').replace(/\D/g, '');
     const email = String(body.email || '').trim().toLowerCase();
     const role = String(body.role || 'passenger').trim().toLowerCase();
     const purpose = ['login', 'signup', 'reset'].includes(body.purpose) ? body.purpose : 'login';
-    const name = String(body.name || (email ? email.split('@')[0] : `User ${rawMobile.slice(-4)}`)).trim();
+    const name = String(body.name || email.split('@')[0] || 'RailYatra User').trim();
 
-    if (!/^[6-9]\d{9}$/.test(rawMobile)) {
+    if (!/^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$/.test(email)) {
+      return Response.json({ detail: 'Enter a valid email address.' }, { status: 400 });
+    }
+    if (DISPOSABLE_DOMAINS.has(email.split('@')[1])) {
       return Response.json(
-        { detail: 'Enter a valid 10-digit Indian WhatsApp mobile number starting with 6-9.' },
+        { detail: 'Disposable email addresses are not permitted. Use a genuine email ID.' },
         { status: 400 }
       );
     }
-
-    if (email) {
-      if (!/^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$/.test(email)) {
-        return Response.json({ detail: 'Enter a valid email address or leave Email blank.' }, { status: 400 });
-      }
-      if (DISPOSABLE_DOMAINS.has(email.split('@')[1])) {
-        return Response.json(
-          { detail: 'Disposable email domains are blocked. Use a genuine email ID or leave it optional.' },
-          { status: 400 }
-        );
-      }
-    }
-
     if (!['passenger', 'tte', 'admin'].includes(role)) {
-      return Response.json({ detail: 'Invalid role selected.' }, { status: 400 });
+      return Response.json({ detail: 'Invalid portal role selected.' }, { status: 400 });
     }
 
-    const formattedMobile = `+91 ${rawMobile.slice(0, 5)} ${rawMobile.slice(5)}`;
-    const waNumber = `91${rawMobile}`;
+    const smtpUser = (process.env.SMTP_USER || '').trim();
+    const smtpPass = (process.env.SMTP_PASS || '').replace(/\s+/g, '');
+    const smtpHost = (process.env.SMTP_HOST || 'smtp.gmail.com').trim();
+    const smtpPort = Number(process.env.SMTP_PORT || 587);
+
+    if (!smtpUser || !smtpPass) {
+      return Response.json(
+        { detail: 'Email server not configured. Add SMTP_USER and SMTP_PASS in Netlify Environment Variables.' },
+        { status: 503 }
+      );
+    }
+
     const otp = String(crypto.randomInt(100000, 1000000));
     const expiresAt = Date.now() + 5 * 60 * 1000;
     const secret = process.env.AUTH_SECRET || 'railyatra-3d-netlify-otp-secret';
 
     const payloadB64 = Buffer.from(
-      JSON.stringify({ mobile: rawMobile, formattedMobile, email, role, name, purpose, expiresAt }),
+      JSON.stringify({ email, role, name, purpose, expiresAt }),
       'utf8'
     ).toString('base64url');
 
@@ -63,141 +62,56 @@ export default async (req) => {
       .digest('hex');
 
     const challenge = `${payloadB64}.${sig}`;
-    const actionLabel =
+    const subjectTitle =
       purpose === 'reset'
-        ? 'password reset'
+        ? 'Password Reset Verification Code'
         : purpose === 'signup'
-        ? 'new account signup'
-        : 'sign-in';
-    const waText = `RailYatra 3D: Your WhatsApp ${actionLabel} verification code is *${otp}*. Valid for 5 minutes. Do not share this code.`;
+        ? 'Verify Your New RailYatra 3D Account'
+        : 'Your RailYatra 3D Sign-In Code';
 
-    let sentViaWhatsapp = false;
-    let sentViaEmail = false;
-    let waNote = '';
+    const transporter =
+      smtpHost === 'smtp.gmail.com'
+        ? nodemailer.createTransport({
+            service: 'gmail',
+            auth: { user: smtpUser, pass: smtpPass },
+          })
+        : nodemailer.createTransport({
+            host: smtpHost,
+            port: smtpPort,
+            secure: smtpPort === 465,
+            auth: { user: smtpUser, pass: smtpPass },
+          });
 
-    // 1A. Meta WhatsApp Cloud API (WHATSAPP_TOKEN + WHATSAPP_PHONE_NUMBER_ID)
-    const waToken = (process.env.WHATSAPP_TOKEN || '').trim();
-    const waPhoneId = (process.env.WHATSAPP_PHONE_NUMBER_ID || '').trim();
+    await transporter.sendMail({
+      from: `"RailYatra 3D Security" <${smtpUser}>`,
+      to: email,
+      subject: `${subjectTitle}: ${otp}`,
+      text: `Hello ${name},\n\nYour 6-digit RailYatra 3D verification code is: ${otp}\n\nPortal Role: ${role.toUpperCase()}\nValid for: 5 minutes.\n\nIf you did not request this, you can safely ignore this email.`,
+      html: `
+        <div style="font-family:Segoe UI,Arial,sans-serif;max-width:480px;margin:0 auto;padding:24px;border:1px solid #e2e8f0;border-radius:14px;background:#ffffff;">
+          <div style="font-size:12px;font-weight:700;color:#1d4ed8;letter-spacing:0.06em;text-transform:uppercase;margin-bottom:6px;">RailYatra 3D Security</div>
+          <h2 style="color:#07244d;margin:0 0 10px;font-size:20px;">${subjectTitle}</h2>
+          <p style="color:#334155;font-size:14px;line-height:1.5;margin:0 0 18px;">
+            Hello <strong>${name}</strong>, enter the verification code below to continue to your <strong>${role.toUpperCase()}</strong> portal:
+          </p>
+          <div style="background:#eff6ff;border:1px solid #bfdbfe;border-radius:12px;padding:18px;text-align:center;margin:20px 0;">
+            <span style="font-size:30px;font-weight:700;letter-spacing:10px;color:#1d4ed8;font-family:monospace;">${otp}</span>
+          </div>
+          <p style="color:#64748b;font-size:12px;margin:0;">This code expires in 5 minutes. Never share your OTP with anyone.</p>
+        </div>
+      `,
+    });
 
-    if (waToken && waPhoneId) {
-      try {
-        const metaRes = await fetch(`https://graph.facebook.com/v20.0/${waPhoneId}/messages`, {
-          method: 'POST',
-          headers: {
-            Authorization: `Bearer ${waToken}`,
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({
-            messaging_product: 'whatsapp',
-            to: waNumber,
-            type: 'text',
-            text: { body: waText },
-          }),
-        });
-        const metaData = await metaRes.json().catch(() => ({}));
-        if (metaRes.ok && metaData.messages?.length) {
-          sentViaWhatsapp = true;
-        } else {
-          waNote = metaData?.error?.message || 'WhatsApp Cloud API rejected message';
-        }
-      } catch (err) {
-        waNote = err?.message || 'WhatsApp Cloud API error';
-      }
-    }
-
-    // 1B. Twilio WhatsApp API (TWILIO_ACCOUNT_SID + TWILIO_AUTH_TOKEN + TWILIO_WHATSAPP_FROM)
-    const twilioSid = (process.env.TWILIO_ACCOUNT_SID || '').trim();
-    const twilioToken = (process.env.TWILIO_AUTH_TOKEN || '').trim();
-    const twilioWaFrom = (process.env.TWILIO_WHATSAPP_FROM || '').trim();
-
-    if (!sentViaWhatsapp && twilioSid && twilioToken && twilioWaFrom) {
-      try {
-        const authHeader = Buffer.from(`${twilioSid}:${twilioToken}`).toString('base64');
-        const fromFormatted = twilioWaFrom.startsWith('whatsapp:')
-          ? twilioWaFrom
-          : `whatsapp:${twilioWaFrom}`;
-        const params = new URLSearchParams({
-          To: `whatsapp:+${waNumber}`,
-          From: fromFormatted,
-          Body: waText,
-        });
-        const twRes = await fetch(
-          `https://api.twilio.com/2010-04-01/Accounts/${twilioSid}/Messages.json`,
-          {
-            method: 'POST',
-            headers: {
-              Authorization: `Basic ${authHeader}`,
-              'Content-Type': 'application/x-www-form-urlencoded',
-            },
-            body: params.toString(),
-          }
-        );
-        const twData = await twRes.json().catch(() => ({}));
-        if (twRes.ok && twData.sid) {
-          sentViaWhatsapp = true;
-        } else {
-          waNote = twData.message || 'Twilio WhatsApp rejected message';
-        }
-      } catch (err) {
-        waNote = err?.message || 'Twilio WhatsApp error';
-      }
-    }
-
-    // 2. Optional Email backup if Email ID is provided and SMTP is configured
-    const smtpUser = (process.env.SMTP_USER || '').trim();
-    const smtpPass = (process.env.SMTP_PASS || '').replace(/\s+/g, '');
-    const smtpHost = (process.env.SMTP_HOST || 'smtp.gmail.com').trim();
-    const smtpPort = Number(process.env.SMTP_PORT || 587);
-
-    if (email && smtpUser && smtpPass) {
-      try {
-        const transporter =
-          smtpHost === 'smtp.gmail.com'
-            ? nodemailer.createTransport({
-                service: 'gmail',
-                auth: { user: smtpUser, pass: smtpPass },
-              })
-            : nodemailer.createTransport({
-                host: smtpHost,
-                port: smtpPort,
-                secure: smtpPort === 465,
-                auth: { user: smtpUser, pass: smtpPass },
-              });
-
-        await transporter.sendMail({
-          from: `"RailYatra 3D Security" <${smtpUser}>`,
-          to: email,
-          subject: `RailYatra 3D Verification Code: ${otp}`,
-          text: `Hello ${name},\n\nYour RailYatra 3D ${actionLabel} verification code is: ${otp}\n\nWhatsApp Mobile: ${formattedMobile}\nPortal Role: ${role.toUpperCase()}\nValid for: 5 minutes.`,
-        });
-        sentViaEmail = true;
-      } catch {
-        // Non-blocking
-      }
-    }
-
-    const deliveredLive = sentViaWhatsapp || sentViaEmail;
-    const responsePayload = {
+    return Response.json({
       sent: true,
-      mobile: formattedMobile,
       email,
-      sent_via_whatsapp: sentViaWhatsapp,
-      sent_via_email: sentViaEmail,
-      delivery_mode: deliveredLive ? 'live' : 'preview',
       challenge,
       expires_in: 300,
-    };
-
-    if (!deliveredLive) {
-      responsePayload.preview_otp = otp;
-      if (waNote) responsePayload.wa_note = waNote;
-    }
-
-    return Response.json(responsePayload);
+    });
   } catch (err) {
     return Response.json(
-      { detail: `Could not generate WhatsApp OTP: ${err?.message || 'Unexpected error'}` },
-      { status: 400 }
+      { detail: `Could not send verification email: ${err?.message || 'Check SMTP settings in Netlify.'}` },
+      { status: 502 }
     );
   }
 };
