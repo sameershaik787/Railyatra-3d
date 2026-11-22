@@ -20,12 +20,12 @@ export default async (req) => {
     const rawMobile = String(body.mobile || '').replace(/\D/g, '');
     const email = String(body.email || '').trim().toLowerCase();
     const role = String(body.role || 'passenger').trim().toLowerCase();
-    const purpose = body.purpose === 'reset' ? 'reset' : 'login';
+    const purpose = ['login', 'signup', 'reset'].includes(body.purpose) ? body.purpose : 'login';
     const name = String(body.name || (email ? email.split('@')[0] : `User ${rawMobile.slice(-4)}`)).trim();
 
     if (!/^[6-9]\d{9}$/.test(rawMobile)) {
       return Response.json(
-        { detail: 'Enter a valid 10-digit Indian mobile number starting with 6-9.' },
+        { detail: 'Enter a valid 10-digit Indian WhatsApp mobile number starting with 6-9.' },
         { status: 400 }
       );
     }
@@ -47,7 +47,7 @@ export default async (req) => {
     }
 
     const formattedMobile = `+91 ${rawMobile.slice(0, 5)} ${rawMobile.slice(5)}`;
-    const e164Mobile = `+91${rawMobile}`;
+    const waNumber = `91${rawMobile}`;
     const otp = String(crypto.randomInt(100000, 1000000));
     const expiresAt = Date.now() + 5 * 60 * 1000;
     const secret = process.env.AUTH_SECRET || 'railyatra-3d-netlify-otp-secret';
@@ -63,26 +63,63 @@ export default async (req) => {
       .digest('hex');
 
     const challenge = `${payloadB64}.${sig}`;
-    const actionLabel = purpose === 'reset' ? 'password reset' : 'sign-in verification';
-    const smsText = `RailYatra 3D: Your ${actionLabel} OTP is ${otp}. Valid for 5 minutes. Do not share this code.`;
+    const actionLabel =
+      purpose === 'reset'
+        ? 'password reset'
+        : purpose === 'signup'
+        ? 'new account signup'
+        : 'sign-in';
+    const waText = `RailYatra 3D: Your WhatsApp ${actionLabel} verification code is *${otp}*. Valid for 5 minutes. Do not share this code.`;
 
-    let sentViaSms = false;
+    let sentViaWhatsapp = false;
     let sentViaEmail = false;
-    let smsNote = '';
-    let smtpNote = '';
+    let waNote = '';
 
-    // 1A. Real Mobile SMS via Twilio (if TWILIO_* env vars are set in Netlify)
+    // 1A. Meta WhatsApp Cloud API (WHATSAPP_TOKEN + WHATSAPP_PHONE_NUMBER_ID)
+    const waToken = (process.env.WHATSAPP_TOKEN || '').trim();
+    const waPhoneId = (process.env.WHATSAPP_PHONE_NUMBER_ID || '').trim();
+
+    if (waToken && waPhoneId) {
+      try {
+        const metaRes = await fetch(`https://graph.facebook.com/v20.0/${waPhoneId}/messages`, {
+          method: 'POST',
+          headers: {
+            Authorization: `Bearer ${waToken}`,
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            messaging_product: 'whatsapp',
+            to: waNumber,
+            type: 'text',
+            text: { body: waText },
+          }),
+        });
+        const metaData = await metaRes.json().catch(() => ({}));
+        if (metaRes.ok && metaData.messages?.length) {
+          sentViaWhatsapp = true;
+        } else {
+          waNote = metaData?.error?.message || 'WhatsApp Cloud API rejected message';
+        }
+      } catch (err) {
+        waNote = err?.message || 'WhatsApp Cloud API error';
+      }
+    }
+
+    // 1B. Twilio WhatsApp API (TWILIO_ACCOUNT_SID + TWILIO_AUTH_TOKEN + TWILIO_WHATSAPP_FROM)
     const twilioSid = (process.env.TWILIO_ACCOUNT_SID || '').trim();
     const twilioToken = (process.env.TWILIO_AUTH_TOKEN || '').trim();
-    const twilioFrom = (process.env.TWILIO_PHONE_NUMBER || '').trim();
+    const twilioWaFrom = (process.env.TWILIO_WHATSAPP_FROM || '').trim();
 
-    if (twilioSid && twilioToken && twilioFrom) {
+    if (!sentViaWhatsapp && twilioSid && twilioToken && twilioWaFrom) {
       try {
         const authHeader = Buffer.from(`${twilioSid}:${twilioToken}`).toString('base64');
+        const fromFormatted = twilioWaFrom.startsWith('whatsapp:')
+          ? twilioWaFrom
+          : `whatsapp:${twilioWaFrom}`;
         const params = new URLSearchParams({
-          To: e164Mobile,
-          From: twilioFrom,
-          Body: smsText,
+          To: `whatsapp:+${waNumber}`,
+          From: fromFormatted,
+          Body: waText,
         });
         const twRes = await fetch(
           `https://api.twilio.com/2010-04-01/Accounts/${twilioSid}/Messages.json`,
@@ -97,48 +134,16 @@ export default async (req) => {
         );
         const twData = await twRes.json().catch(() => ({}));
         if (twRes.ok && twData.sid) {
-          sentViaSms = true;
+          sentViaWhatsapp = true;
         } else {
-          smsNote = twData.message || 'Twilio SMS rejected';
+          waNote = twData.message || 'Twilio WhatsApp rejected message';
         }
       } catch (err) {
-        smsNote = err?.message || 'Twilio connection error';
+        waNote = err?.message || 'Twilio WhatsApp error';
       }
     }
 
-    // 1B. Real Mobile SMS via Fast2SMS (if FAST2SMS_API_KEY is set and Twilio wasn't used)
-    const fast2smsKey = (process.env.FAST2SMS_API_KEY || '').trim();
-    const fast2smsRoute = (process.env.FAST2SMS_ROUTE || 'q').trim();
-
-    if (!sentViaSms && fast2smsKey) {
-      try {
-        const payload =
-          fast2smsRoute === 'otp'
-            ? { route: 'otp', variables_values: otp, numbers: rawMobile }
-            : { route: 'q', message: smsText, language: 'english', flash: 0, numbers: rawMobile };
-
-        const smsRes = await fetch('https://www.fast2sms.com/dev/bulkV2', {
-          method: 'POST',
-          headers: {
-            authorization: fast2smsKey,
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify(payload),
-        });
-        const smsData = await smsRes.json().catch(() => ({}));
-        if (smsRes.ok && smsData.return === true) {
-          sentViaSms = true;
-        } else {
-          smsNote = Array.isArray(smsData.message)
-            ? smsData.message.join(', ')
-            : smsData.message || 'Fast2SMS rejected request';
-        }
-      } catch (err) {
-        smsNote = err?.message || 'Fast2SMS connection error';
-      }
-    }
-
-    // 2. Real Email OTP via Gmail/SMTP (for any valid recipient email)
+    // 2. Optional Email backup if Email ID is provided and SMTP is configured
     const smtpUser = (process.env.SMTP_USER || '').trim();
     const smtpPass = (process.env.SMTP_PASS || '').replace(/\s+/g, '');
     const smtpHost = (process.env.SMTP_HOST || 'smtp.gmail.com').trim();
@@ -162,34 +167,21 @@ export default async (req) => {
         await transporter.sendMail({
           from: `"RailYatra 3D Security" <${smtpUser}>`,
           to: email,
-          subject:
-            purpose === 'reset'
-              ? `RailYatra 3D Password Reset OTP: ${otp}`
-              : `RailYatra 3D Verification Code: ${otp}`,
-          text: `Hello ${name},\n\nYour RailYatra 3D ${actionLabel} code is: ${otp}\n\nMobile: ${formattedMobile}\nPortal Role: ${role.toUpperCase()}\nValid for: 5 minutes.`,
-          html: `
-            <div style="font-family:Segoe UI,Arial,sans-serif;max-width:480px;margin:0 auto;padding:24px;border:1px solid #e2e8f0;border-radius:12px;">
-              <h2 style="color:#07244d;margin:0 0 8px;">RailYatra 3D ${purpose === 'reset' ? 'Password Reset' : 'Verification'}</h2>
-              <p style="color:#334155;font-size:14px;">Hello ${name}, use the code below for your <strong>${role.toUpperCase()}</strong> ${actionLabel} (${formattedMobile}):</p>
-              <div style="background:#eff6ff;border:1px solid #bfdbfe;border-radius:10px;padding:16px;text-align:center;margin:20px 0;">
-                <span style="font-size:28px;font-weight:700;letter-spacing:8px;color:#1d4ed8;font-family:monospace;">${otp}</span>
-              </div>
-              <p style="color:#64748b;font-size:12px;margin:0;">This code expires in 5 minutes. Do not share it with anyone.</p>
-            </div>
-          `,
+          subject: `RailYatra 3D Verification Code: ${otp}`,
+          text: `Hello ${name},\n\nYour RailYatra 3D ${actionLabel} verification code is: ${otp}\n\nWhatsApp Mobile: ${formattedMobile}\nPortal Role: ${role.toUpperCase()}\nValid for: 5 minutes.`,
         });
         sentViaEmail = true;
-      } catch (err) {
-        smtpNote = err?.message || 'SMTP delivery issue';
+      } catch {
+        // Non-blocking
       }
     }
 
-    const deliveredLive = sentViaSms || sentViaEmail;
+    const deliveredLive = sentViaWhatsapp || sentViaEmail;
     const responsePayload = {
       sent: true,
       mobile: formattedMobile,
       email,
-      sent_via_sms: sentViaSms,
+      sent_via_whatsapp: sentViaWhatsapp,
       sent_via_email: sentViaEmail,
       delivery_mode: deliveredLive ? 'live' : 'preview',
       challenge,
@@ -198,14 +190,13 @@ export default async (req) => {
 
     if (!deliveredLive) {
       responsePayload.preview_otp = otp;
-      if (smsNote) responsePayload.sms_note = smsNote;
-      if (smtpNote) responsePayload.smtp_note = smtpNote;
+      if (waNote) responsePayload.wa_note = waNote;
     }
 
     return Response.json(responsePayload);
   } catch (err) {
     return Response.json(
-      { detail: `Could not generate OTP: ${err?.message || 'Unexpected error'}` },
+      { detail: `Could not generate WhatsApp OTP: ${err?.message || 'Unexpected error'}` },
       { status: 400 }
     );
   }
