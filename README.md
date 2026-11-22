@@ -1,7 +1,7 @@
 # RailYatra 3D - Spatial Indian Railways Ticket Booking Portal
 
 ## Project Brief
-- **Category:** Full-Stack Web Application & Interactive 3D WebGL System (Capstone Project)
+- **Category:** Full-Stack Web Application & Interactive 3D WebGL System
 - **Architecture:** Decoupled Client-Server (`frontend/` + `backend/`)
 - **Core Capabilities:** Interactive 3D LHB Coach Viewer (3A, 2A, 1A), Day/Night Berth Folding, 1st-Person POV Walkthrough, Role-Based Access Control (Passenger, TTE, Admin), and IRCTC-style Checkout & Electronic Reservation Slip (ERS) Generation.
 
