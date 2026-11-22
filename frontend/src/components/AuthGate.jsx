@@ -11,7 +11,6 @@ import {
   Train,
 } from 'lucide-react';
 
-const API_BASE = (import.meta.env.VITE_API_URL || 'http://localhost:8000').replace(/\/+$/, '');
 const DISPOSABLE_DOMAINS = [
   'mailinator.com',
   'tempmail.com',
@@ -33,7 +32,7 @@ export default function AuthGate({ onAuthenticated }) {
   const [email, setEmail] = useState('');
   const [step, setStep] = useState('email');
   const [otpInput, setOtpInput] = useState('');
-  const [localFallbackOtp, setLocalFallbackOtp] = useState('');
+  const [challenge, setChallenge] = useState('');
   const [deliveryInfo, setDeliveryInfo] = useState('');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
@@ -69,41 +68,40 @@ export default function AuthGate({ onAuthenticated }) {
 
     setError('');
     setLoading(true);
-    setLocalFallbackOtp('');
     setDeliveryInfo('');
 
     const cleanedEmail = email.trim().toLowerCase();
     const displayName = name.trim() || cleanedEmail.split('@')[0];
 
     try {
-      const res = await fetch(`${API_BASE}/api/auth/send-otp`, {
+      const res = await fetch('/.netlify/functions/send-otp', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ email: cleanedEmail, name: displayName, role }),
       });
+
+      const contentType = res.headers.get('content-type') || '';
+      if (!contentType.includes('application/json')) {
+        throw new Error('Netlify OTP function is not active yet. Deploy to Netlify to send real emails.');
+      }
+
       const data = await res.json();
       if (!res.ok) {
         throw new Error(data.detail || 'Could not dispatch OTP.');
       }
 
+      setChallenge(data.challenge || '');
       if (data.delivery_mode === 'email') {
-        setDeliveryInfo(`A 6-digit verification code has been emailed to ${cleanedEmail}. Check Inbox or Spam.`);
+        setDeliveryInfo(`A 6-digit verification code has been emailed to ${cleanedEmail}. Check your Inbox or Spam folder.`);
       } else {
-        setLocalFallbackOtp(data.preview_otp || '');
         setDeliveryInfo(
-          `Backend SMTP is not configured yet. Temporary verification code for ${cleanedEmail}: ${data.preview_otp}`
+          `Add SMTP_USER and SMTP_PASS in Netlify Environment Variables to send real emails. Preview OTP: ${data.preview_otp}`
         );
       }
       setStep('otp');
       setSecondsLeft(300);
     } catch (err) {
-      const generated = String(Math.floor(100000 + Math.random() * 900000));
-      setLocalFallbackOtp(generated);
-      setDeliveryInfo(
-        `Auth server unreachable (${API_BASE}). Set VITE_API_URL in Netlify to enable email OTP. Temporary code: ${generated}`
-      );
-      setStep('otp');
-      setSecondsLeft(300);
+      setError(err.message || 'Unable to reach OTP service.');
     } finally {
       setLoading(false);
     }
@@ -128,10 +126,16 @@ export default function AuthGate({ onAuthenticated }) {
     const displayName = name.trim() || cleanedEmail.split('@')[0];
 
     try {
-      const res = await fetch(`${API_BASE}/api/auth/verify-otp`, {
+      const res = await fetch('/.netlify/functions/verify-otp', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email: cleanedEmail, otp: code, role, name: displayName }),
+        body: JSON.stringify({
+          email: cleanedEmail,
+          otp: code,
+          role,
+          name: displayName,
+          challenge,
+        }),
       });
       const data = await res.json();
       if (!res.ok) {
@@ -142,18 +146,7 @@ export default function AuthGate({ onAuthenticated }) {
         ...data.user,
       });
     } catch (err) {
-      if (localFallbackOtp && code === localFallbackOtp) {
-        onAuthenticated({
-          token: `verified-session-${Date.now()}`,
-          email: cleanedEmail,
-          name: displayName,
-          role,
-          verified: true,
-          verified_at: new Date().toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' }),
-        });
-      } else {
-        setError(err.message || 'Verification failed. Double-check your 6-digit OTP.');
-      }
+      setError(err.message || 'Verification failed. Double-check your 6-digit OTP.');
     } finally {
       setLoading(false);
     }
