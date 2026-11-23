@@ -1,3 +1,4 @@
+import EmbeddedAuthCard from './components/EmbeddedAuthCard';
 import { QUOTA_PILLS, TRAINS_CATALOG } from './data/railData';
 import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import * as THREE from 'three';
@@ -2072,161 +2073,18 @@ const AuthPortal = ({ onLogin }) => {
 
         {/* RIGHT SIDE: CRISP WHITE FLOATING MAKEMYTRIP AUTH CARD */}
         <div className="lg:col-span-5">
-          <div className="bg-white rounded-3xl shadow-2xl border border-slate-200 p-6 sm:p-8 text-slate-800">
-            {/* Login / Create Account Pill Tabs */}
-            <div className="grid grid-cols-2 bg-[#F2F4F7] p-1 rounded-full mb-6">
-              <button
-                type="button"
-                onClick={() => { setMode('LOGIN'); setError(''); }}
-                className={`py-2.5 rounded-full text-xs sm:text-sm font-bold transition cursor-pointer ${
-                  mode === 'LOGIN'
-                    ? 'bg-white text-[#065AF3] shadow-sm'
-                    : 'text-slate-500 hover:text-slate-800'
-                }`}
-              >
-                Login
-              </button>
-              <button
-                type="button"
-                onClick={() => { setMode('SIGNUP'); setError(''); }}
-                className={`py-2.5 rounded-full text-xs sm:text-sm font-bold transition cursor-pointer ${
-                  mode === 'SIGNUP'
-                    ? 'bg-white text-[#065AF3] shadow-sm'
-                    : 'text-slate-500 hover:text-slate-800'
-                }`}
-              >
-                Create Account
-              </button>
-            </div>
-
-            <div className="mb-5">
-              <h2 className="text-xl font-extrabold text-slate-900">
-                {mode === 'LOGIN' ? 'Welcome back, Traveller' : 'Create Your RailYatra Account'}
-              </h2>
-              <p className="text-xs text-slate-500 mt-1">
-                Sign in with your mobile number or email, or select a staff/traveller role below.
-              </p>
-            </div>
-
-            {error && (
-              <div className="mb-4 p-3 rounded-xl bg-red-50 border border-red-200 text-xs text-red-700 flex items-center gap-2">
-                <AlertCircle className="w-4 h-4 shrink-0" />
-                <span>{error}</span>
-              </div>
-            )}
-
-            <form onSubmit={handleFormSubmit} className="space-y-3.5">
-              {mode === 'SIGNUP' && (
-                <div>
-                  <label className="block text-xs font-bold text-slate-700 mb-1">Full Name</label>
-                  <input
-                    type="text"
-                    value={name}
-                    onChange={(e) => setName(e.target.value)}
-                    placeholder="e.g., Aaravind Sharma"
-                    className="w-full px-4 py-2.5 text-sm border border-slate-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-[#065AF3]"
-                  />
-                </div>
-              )}
-
-              <div>
-                <label className="block text-xs font-bold text-slate-700 mb-1">
-                  Mobile Number or Email
-                </label>
-                <input
-                  type="text"
-                  required
-                  value={email}
-                  onChange={(e) => setEmail(e.target.value)}
-                  className="w-full px-4 py-2.5 text-sm border border-slate-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-[#065AF3]"
-                />
-              </div>
-
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                <div>
-                  <label className="block text-xs font-bold text-slate-700 mb-1">Password</label>
-                  <input
-                    type="password"
-                    required
-                    value={password}
-                    onChange={(e) => setPassword(e.target.value)}
-                    className="w-full px-4 py-2.5 text-sm border border-slate-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-[#065AF3]"
-                  />
-                </div>
-
-                <div>
-                  <label className="block text-xs font-bold text-slate-700 mb-1">Account Role</label>
-                  <select
-                    value={selectedRole}
-                    onChange={(e) => {
-                      const r = e.target.value;
-                      setSelectedRole(r);
-                      setEmail(DEMO_USERS[r].email);
-                    }}
-                    className="w-full px-3 py-2.5 text-sm border border-slate-300 rounded-xl bg-white font-semibold text-slate-800 focus:outline-none focus:ring-2 focus:ring-[#065AF3]"
-                  >
-                    <option value="PASSENGER">Traveller</option>
-                    <option value="TTE">TTE Staff</option>
-                    <option value="ADMIN">Railway Admin</option>
-                  </select>
-                </div>
-              </div>
-
-              <button
-                type="submit"
-                style={{ background: 'linear-gradient(93deg, #53B2FE 0%, #065AF3 100%)' }}
-                className="w-full py-3.5 rounded-full text-white font-bold text-sm shadow-lg hover:shadow-xl hover:-translate-y-0.5 transition cursor-pointer flex items-center justify-center gap-2"
-              >
-                <span>{mode === 'LOGIN' ? 'Sign In to RailYatra 3D' : 'Create Free Account'}</span>
-                <ArrowRight className="w-4 h-4" />
-              </button>
-            </form>
-
-            {/* Clean Quick Sign-In by Role */}
-            <div className="mt-6 pt-5 border-t border-slate-200">
-              <div className="text-xs font-bold text-slate-500 mb-2.5">
-                Quick Sign-In by Portal Role
-              </div>
-              <div className="space-y-2">
-                {[
-                  {
-                    key: 'PASSENGER',
-                    title: 'Traveller',
-                    desc: 'Search trains, inspect 3D coaches, book tickets & view PNR',
-                    dot: 'bg-[#00A16B]'
-                  },
-                  {
-                    key: 'TTE',
-                    title: 'TTE Staff',
-                    desc: 'Onboard HHT chart, verify IDs & update boarded/no-show status',
-                    dot: 'bg-[#065AF3]'
-                  },
-                  {
-                    key: 'ADMIN',
-                    title: 'Railway Admin',
-                    desc: 'Flexi-Fare management, coach occupancy & quota controls',
-                    dot: 'bg-[#D9381E]'
-                  }
-                ].map(r => (
-                  <button
-                    key={r.key}
-                    type="button"
-                    onClick={() => onLogin(DEMO_USERS[r.key])}
-                    className="w-full flex items-center justify-between p-2.5 rounded-xl border border-slate-200 hover:border-[#065AF3] hover:bg-blue-50/40 transition text-left cursor-pointer group"
-                  >
-                    <div className="flex items-start gap-2.5">
-                      <span className={`w-2 h-2 rounded-full mt-1.5 shrink-0 ${r.dot}`} />
-                      <div>
-                        <div className="text-xs font-bold text-slate-900">{r.title}</div>
-                        <div className="text-[11px] text-slate-500 mt-0.5">{r.desc}</div>
-                      </div>
-                    </div>
-                    <ChevronRight className="w-4 h-4 text-slate-400 group-hover:text-[#065AF3] shrink-0" />
-                  </button>
-                ))}
-              </div>
-            </div>
-          </div>
+          <EmbeddedAuthCard
+            onAuthenticated={(u) => {
+              const roleMap = {
+                admin: DEMO_USERS.ADMIN || DEMO_USERS.admin || DEMO_USERS.RAILWAY_ADMIN,
+                tte: DEMO_USERS.TTE || DEMO_USERS.tte || DEMO_USERS.TTE_STAFF,
+                passenger: DEMO_USERS.TRAVELLER || DEMO_USERS.PASSENGER || DEMO_USERS.passenger || Object.values(DEMO_USERS)[0],
+              };
+              const baseUser = roleMap[u.role] || Object.values(DEMO_USERS)[0] || {};
+              onLogin({ ...baseUser, name: u.name, email: u.email, verified: true });
+              window.dispatchEvent(new CustomEvent('railyatra:auth', { detail: u }));
+            }}
+          />
         </div>
       </div>
     </div>

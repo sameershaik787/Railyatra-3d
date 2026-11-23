@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import { Train, UtensilsCrossed, ShieldCheck, LogOut } from 'lucide-react';
 import BharatRailSpatial from './BharatRailSpatial';
 import FoodCateringHub from './components/FoodCateringHub';
@@ -34,6 +34,12 @@ export default function App() {
       year: 'numeric',
     });
   }, [journeyDate]);
+
+  useEffect(() => {
+    const onAuthEvent = (e) => { if (e?.detail) handleAuthenticated(e.detail); };
+    window.addEventListener('railyatra:auth', onAuthEvent);
+    return () => window.removeEventListener('railyatra:auth', onAuthEvent);
+  }, []);
 
   const handleAuthenticated = (verifiedUser) => {
     setUser(verifiedUser);
