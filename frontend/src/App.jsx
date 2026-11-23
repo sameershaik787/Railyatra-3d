@@ -1,8 +1,9 @@
 import React, { useState, useMemo, useEffect } from 'react';
-import { Train, UtensilsCrossed, ShieldCheck, LogOut } from 'lucide-react';
+import { Train, UtensilsCrossed, ShieldCheck, LogOut, Database } from 'lucide-react';
 import BharatRailSpatial from './BharatRailSpatial';
 import FoodCateringHub from './components/FoodCateringHub';
 import AdminDashboard from './components/AdminDashboard';
+import AdminUsersDatabasePanel from './components/AdminUsersDatabasePanel';
 
 function formatIsoDate(dateObj) {
   const y = dateObj.getFullYear();
@@ -21,6 +22,7 @@ export default function App() {
     }
   });
   const [activeSection, setActiveSection] = useState('booking');
+  const [adminTab, setAdminTab] = useState('database');
   const todayIso = useMemo(() => formatIsoDate(new Date()), []);
   const [journeyDate, setJourneyDate] = useState(todayIso);
 
@@ -35,12 +37,6 @@ export default function App() {
     });
   }, [journeyDate]);
 
-  useEffect(() => {
-    const onAuthEvent = (e) => { if (e?.detail) handleAuthenticated(e.detail); };
-    window.addEventListener('railyatra:auth', onAuthEvent);
-    return () => window.removeEventListener('railyatra:auth', onAuthEvent);
-  }, []);
-
   const handleAuthenticated = (verifiedUser) => {
     setUser(verifiedUser);
     try {
@@ -48,6 +44,14 @@ export default function App() {
     } catch {}
     setActiveSection(verifiedUser.role === 'admin' ? 'admin' : 'booking');
   };
+
+  useEffect(() => {
+    const onAuthEvent = (e) => {
+      if (e?.detail) handleAuthenticated(e.detail);
+    };
+    window.addEventListener('railyatra:auth', onAuthEvent);
+    return () => window.removeEventListener('railyatra:auth', onAuthEvent);
+  }, []);
 
   const handleLogout = () => {
     setUser(null);
@@ -73,10 +77,30 @@ export default function App() {
 
           <div className="flex items-center gap-2 flex-wrap justify-end">
             {user?.role === 'admin' ? (
-              <span className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-full text-xs font-semibold bg-white text-blue-700 border border-blue-500 shadow-sm">
-                <ShieldCheck className="w-3.5 h-3.5 text-emerald-600" />
-                Admin Resource Console
-              </span>
+              <>
+                <button
+                  onClick={() => setAdminTab('database')}
+                  className={`flex items-center gap-1.5 px-3.5 py-1.5 rounded-full text-xs font-semibold transition ${
+                    adminTab === 'database'
+                      ? 'bg-white text-blue-700 border border-blue-500 shadow-sm'
+                      : 'text-blue-100 hover:bg-white/10 border border-white/15'
+                  }`}
+                >
+                  <Database className="w-3.5 h-3.5 text-emerald-600" />
+                  Users Database
+                </button>
+                <button
+                  onClick={() => setAdminTab('console')}
+                  className={`flex items-center gap-1.5 px-3.5 py-1.5 rounded-full text-xs font-semibold transition ${
+                    adminTab === 'console'
+                      ? 'bg-white text-blue-700 border border-blue-500 shadow-sm'
+                      : 'text-blue-100 hover:bg-white/10 border border-white/15'
+                  }`}
+                >
+                  <ShieldCheck className="w-3.5 h-3.5" />
+                  Admin Resource Console
+                </button>
+              </>
             ) : (
               <>
                 <button
@@ -127,7 +151,11 @@ export default function App() {
       </nav>
 
       {user?.role === 'admin' ? (
-        <AdminDashboard user={user} />
+        adminTab === 'database' ? (
+          <AdminUsersDatabasePanel user={user} />
+        ) : (
+          <AdminDashboard user={user} />
+        )
       ) : activeSection === 'food' ? (
         <FoodCateringHub journeyDate={readableDate} onBack={() => setActiveSection('booking')} />
       ) : (

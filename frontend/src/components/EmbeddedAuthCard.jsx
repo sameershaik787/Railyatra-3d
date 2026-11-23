@@ -11,6 +11,7 @@ import {
   Lock,
   Eye,
   EyeOff,
+  Database,
 } from 'lucide-react';
 
 const DISPOSABLE_DOMAINS = [
@@ -28,37 +29,8 @@ const ROLES = [
   { id: 'admin', label: 'Railway Admin' },
 ];
 
-const ACCOUNTS_KEY = 'railyatra_email_accounts_v1';
-
-async function hashPassword(email, password) {
-  const raw = `${email.toLowerCase()}:${password}:railyatra3d-email-auth`;
-  if (typeof window !== 'undefined' && window.crypto?.subtle) {
-    const buf = await window.crypto.subtle.digest('SHA-256', new TextEncoder().encode(raw));
-    return Array.from(new Uint8Array(buf))
-      .map((b) => b.toString(16).padStart(2, '0'))
-      .join('');
-  }
-  return btoa(raw);
-}
-
-function getAccounts() {
-  try {
-    return JSON.parse(localStorage.getItem(ACCOUNTS_KEY) || '{}');
-  } catch {
-    return {};
-  }
-}
-
-function saveAccount(email, record) {
-  try {
-    const all = getAccounts();
-    all[email.toLowerCase()] = record;
-    localStorage.setItem(ACCOUNTS_KEY, JSON.stringify(all));
-  } catch {}
-}
-
 export default function EmbeddedAuthCard({ onAuthenticated }) {
-  const [mode, setMode] = useState('login'); // login | signup | forgot
+  const [mode, setMode] = useState('login');
   const [role, setRole] = useState('passenger');
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
@@ -66,7 +38,7 @@ export default function EmbeddedAuthCard({ onAuthenticated }) {
   const [confirmPassword, setConfirmPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
 
-  const [step, setStep] = useState('details'); // details | otp
+  const [step, setStep] = useState('details');
   const [otpDigits, setOtpDigits] = useState(['', '', '', '', '', '']);
   const [challenge, setChallenge] = useState('');
   const [error, setError] = useState('');
@@ -118,9 +90,7 @@ export default function EmbeddedAuthCard({ onAuthenticated }) {
     if (!pasted) return;
     e.preventDefault();
     const updated = ['', '', '', '', '', ''];
-    for (let i = 0; i < pasted.length; i++) {
-      updated[i] = pasted[i];
-    }
+    for (let i = 0; i < pasted.length; i++) updated[i] = pasted[i];
     setOtpDigits(updated);
     otpRefs.current[Math.min(pasted.length, 5)]?.focus();
   };
@@ -153,37 +123,9 @@ export default function EmbeddedAuthCard({ onAuthenticated }) {
     }
 
     const cleanedEmail = email.trim().toLowerCase();
-    const accounts = getAccounts();
-    const existing = accounts[cleanedEmail];
-
-    if (mode === 'signup' && existing) {
-      setError('This email is already registered. Switch to Login or reset your password.');
-      return;
-    }
-
-    if (mode === 'login') {
-      if (!existing) {
-        setError('No account found for this email. Switch to Create Account to sign up.');
-        return;
-      }
-      const enteredHash = await hashPassword(cleanedEmail, password);
-      if (enteredHash !== existing.passwordHash) {
-        setError('Incorrect password. Try again or use Forgot Password.');
-        return;
-      }
-    }
-
-    if (mode === 'forgot' && !existing) {
-      setError('No registered account found for this email address.');
-      return;
-    }
-
     setError('');
     setSuccessMsg('');
     setLoading(true);
-
-    const effectiveName = mode === 'signup' ? name.trim() : existing?.name || cleanedEmail.split('@')[0];
-    const effectiveRole = mode === 'signup' ? role : existing?.role || role;
 
     try {
       const res = await fetch('/.netlify/functions/send-otp', {
@@ -191,15 +133,16 @@ export default function EmbeddedAuthCard({ onAuthenticated }) {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           email: cleanedEmail,
-          name: effectiveName,
-          role: effectiveRole,
+          name: name.trim(),
+          password,
+          role,
           purpose: mode,
         }),
       });
 
       const contentType = res.headers.get('content-type') || '';
       if (!contentType.includes('application/json')) {
-        throw new Error('Email OTP service is unavailable right now. Please try again.');
+        throw new Error('Backend auth API unavailable on localhost preview. Deploy on Netlify to test live.');
       }
 
       const data = await res.json();
@@ -245,18 +188,15 @@ export default function EmbeddedAuthCard({ onAuthenticated }) {
     setError('');
     setLoading(true);
 
-    const cleanedEmail = email.trim().toLowerCase();
-    const accounts = getAccounts();
-    const existing = accounts[cleanedEmail];
-
     try {
       const res = await fetch('/.netlify/functions/verify-otp', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          email: cleanedEmail,
+          email: email.trim().toLowerCase(),
           otp: code,
           challenge,
+          newPassword: mode === 'forgot' ? password : '',
         }),
       });
 
@@ -265,40 +205,17 @@ export default function EmbeddedAuthCard({ onAuthenticated }) {
         throw new Error(data.detail || 'Incorrect 6-digit OTP.');
       }
 
-      if (mode === 'signup') {
-        const passwordHash = await hashPassword(cleanedEmail, password);
-        saveAccount(cleanedEmail, {
-          email: cleanedEmail,
-          name: name.trim(),
-          role,
-          passwordHash,
-          createdAt: new Date().toISOString(),
-        });
-        onAuthenticated?.({
-          token: data.access_token,
-          ...data.user,
-          name: name.trim(),
-          role,
-        });
-      } else if (mode === 'forgot') {
-        const newHash = await hashPassword(cleanedEmail, password);
-        saveAccount(cleanedEmail, {
-          ...(existing || { email: cleanedEmail, name: data.user?.name || cleanedEmail.split('@')[0], role }),
-          passwordHash: newHash,
-          updatedAt: new Date().toISOString(),
-        });
+      if (mode === 'forgot') {
         setPassword('');
         setConfirmPassword('');
         setOtpDigits(['', '', '', '', '', '']);
         setMode('login');
         setStep('details');
-        setSuccessMsg('Password reset successful. Sign in with your new password.');
+        setSuccessMsg('Password updated in database. Sign in with your new password.');
       } else {
         onAuthenticated?.({
           token: data.access_token,
           ...data.user,
-          name: existing?.name || data.user?.name,
-          role: existing?.role || role,
         });
       }
     } catch (err) {
@@ -313,7 +230,6 @@ export default function EmbeddedAuthCard({ onAuthenticated }) {
 
   return (
     <div className="rounded-3xl bg-white border border-slate-200 shadow-2xl p-6 sm:p-7 text-slate-900 w-full">
-      {/* Login / Create Account Tabs */}
       {mode !== 'forgot' && (
         <div className="grid grid-cols-2 gap-1 p-1 rounded-full bg-slate-100 border border-slate-200 mb-6">
           <button
@@ -343,7 +259,6 @@ export default function EmbeddedAuthCard({ onAuthenticated }) {
         </div>
       )}
 
-      {/* Header */}
       <div className="mb-5">
         <h2 className="text-xl font-bold text-slate-900">
           {mode === 'signup'
@@ -354,39 +269,40 @@ export default function EmbeddedAuthCard({ onAuthenticated }) {
         </h2>
         <p className="text-xs text-slate-500 mt-1">
           {mode === 'signup'
-            ? 'Create your RailYatra 3D account and verify with a real-time Email OTP.'
+            ? 'Create your cloud-synced RailYatra 3D account and verify via Email OTP.'
             : mode === 'forgot'
-            ? 'Verify your registered email via OTP to set a new password.'
-            : 'Sign in with your email, password, and real-time 6-digit Email OTP.'}
+            ? 'Verify your registered email via OTP to reset your password.'
+            : 'Sign in across any device with your email, password, and 6-digit Email OTP.'}
         </p>
       </div>
 
-      {/* Role Selector */}
-      <div className="mb-5">
-        <label className="block text-[11px] font-bold uppercase tracking-wider text-slate-500 mb-2">
-          Select Access Portal
-        </label>
-        <div className="grid grid-cols-3 gap-2">
-          {ROLES.map((item) => {
-            const active = role === item.id;
-            return (
-              <button
-                key={item.id}
-                type="button"
-                disabled={step === 'otp'}
-                onClick={() => setRole(item.id)}
-                className={`rounded-xl px-2.5 py-2.5 text-center border text-xs font-bold transition ${
-                  active
-                    ? 'bg-blue-50 border-blue-600 text-blue-700 shadow-xs'
-                    : 'bg-slate-50 border-slate-200 text-slate-700 hover:border-blue-300'
-                } ${step === 'otp' ? 'opacity-65 cursor-not-allowed' : ''}`}
-              >
-                {item.label}
-              </button>
-            );
-          })}
+      {mode === 'signup' && (
+        <div className="mb-5">
+          <label className="block text-[11px] font-bold uppercase tracking-wider text-slate-500 mb-2">
+            Select Portal Role
+          </label>
+          <div className="grid grid-cols-3 gap-2">
+            {ROLES.map((item) => {
+              const active = role === item.id;
+              return (
+                <button
+                  key={item.id}
+                  type="button"
+                  disabled={step === 'otp'}
+                  onClick={() => setRole(item.id)}
+                  className={`rounded-xl px-2.5 py-2.5 text-center border text-xs font-bold transition ${
+                    active
+                      ? 'bg-blue-50 border-blue-600 text-blue-700 shadow-xs'
+                      : 'bg-slate-50 border-slate-200 text-slate-700 hover:border-blue-300'
+                  } ${step === 'otp' ? 'opacity-65 cursor-not-allowed' : ''}`}
+                >
+                  {item.label}
+                </button>
+              );
+            })}
+          </div>
         </div>
-      </div>
+      )}
 
       {successMsg && (
         <div className="mb-4 rounded-xl bg-emerald-50 border border-emerald-200 px-3.5 py-2.5 text-xs font-medium text-emerald-800 flex items-center gap-2">
@@ -504,7 +420,7 @@ export default function EmbeddedAuthCard({ onAuthenticated }) {
             className="w-full rounded-full bg-gradient-to-r from-blue-600 to-blue-500 hover:from-blue-700 hover:to-blue-600 text-white font-semibold py-3.5 text-sm shadow-md flex items-center justify-center gap-2 transition active:scale-95 disabled:opacity-60"
           >
             {loading
-              ? 'Generating & Sending OTP...'
+              ? 'Verifying & Sending OTP...'
               : mode === 'forgot'
               ? 'Send Reset OTP to Email'
               : mode === 'signup'
@@ -656,10 +572,10 @@ export default function EmbeddedAuthCard({ onAuthenticated }) {
 
       <div className="mt-5 pt-4 border-t border-slate-100 flex items-center justify-between text-[11px] text-slate-500">
         <span className="flex items-center gap-1">
-          <Lock className="w-3 h-3 text-emerald-600" />
-          Real-Time Email OTP
+          <Database className="w-3 h-3 text-emerald-600" />
+          MongoDB Atlas Cloud Auth
         </span>
-        <span>HMAC-SHA256 Verified</span>
+        <span>scrypt + Email OTP</span>
       </div>
     </div>
   );
