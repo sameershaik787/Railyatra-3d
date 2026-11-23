@@ -1,3 +1,4 @@
+import { mergeAllIndiaStations, resolveTravelDateObj, StationSearchField, TravelDatePickerField } from './components/SearchBarWidgets';
 import EmbeddedAuthCard from './components/EmbeddedAuthCard';
 import { QUOTA_PILLS, TRAINS_CATALOG } from './data/railData';
 import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
@@ -29,7 +30,7 @@ const FONT_STYLES = `
 // 1. INDIAN RAILWAYS MASTER CATALOG, STATIONS, TRAINS & RBAC PROFILES
 // ============================================================================
 
-const STATIONS = [
+const STATIONS = mergeAllIndiaStations([
   { code: 'NDLS', name: 'New Delhi', city: 'New Delhi', state: 'Delhi', gate: 'Ajmeri Gate / Paharganj' },
   { code: 'MMCT', name: 'Mumbai Central', city: 'Mumbai', state: 'Maharashtra', gate: 'Main Concourse Gate 1' },
   { code: 'UDZ', name: 'Udaipur City', city: 'Udaipur', state: 'Rajasthan', gate: 'Heritage Main Entry' },
@@ -37,7 +38,7 @@ const STATIONS = [
   { code: 'BCT', name: 'Bandra Terminus', city: 'Mumbai', state: 'Maharashtra', gate: 'East Skywalk Entry' },
   { code: 'HWH', name: 'Howrah Junction', city: 'Kolkata', state: 'West Bengal', gate: 'New Complex Gate 4' },
   { code: 'SBC', name: 'KSR Bengaluru', city: 'Bengaluru', state: 'Karnataka', gate: 'Majestic Metro Concourse' }
-];
+]);
 
 const TRAVEL_DATES = [
   { date: '2026-11-22', dayNum: '22', month: 'Nov', weekday: 'Sun', avail: 'AVL 48', tone: 'green', minFare: 1790 },
@@ -2104,7 +2105,7 @@ export default function App() {
   // MakeMyTrip Hero Search State
   const [fromCode, setFromCode] = useState('NDLS');
   const [toCode, setToCode] = useState('MMCT');
-  const [travelDate, setTravelDate] = useState('2026-11-22');
+  const [travelDate, setTravelDate] = useState(new Date().toISOString().slice(0, 10));
   const [classFilter, setClassFilter] = useState('ALL');
   const [quotaPill, setQuotaPill] = useState('GN');
   const [depSlotFilter, setDepSlotFilter] = useState('ALL');
@@ -2674,7 +2675,7 @@ export default function App() {
 
   const fromStationObj = STATIONS.find(s => s.code === fromCode) || STATIONS[0];
   const toStationObj = STATIONS.find(s => s.code === toCode) || STATIONS[1];
-  const selectedDateObj = TRAVEL_DATES.find(d => d.date === travelDate) || TRAVEL_DATES[0];
+  const selectedDateObj = resolveTravelDateObj(travelDate, TRAVEL_DATES);
   const activeLiveTrain = TRAINS_CATALOG.find(t => t.number === liveTrainNum) || TRAINS_CATALOG[0];
 
   return (
@@ -2811,24 +2812,16 @@ export default function App() {
             </div>
 
             {/* Huge Bold Station & Date Picker Grid */}
-            <div className="grid grid-cols-1 md:grid-cols-12 rounded-2xl border border-slate-200 overflow-hidden divide-y md:divide-y-0 md:divide-x divide-slate-200 bg-white">
+            <div className="grid grid-cols-1 md:grid-cols-12 rounded-2xl border border-slate-200 overflow-visible divide-y md:divide-y-0 md:divide-x divide-slate-200 bg-white">
               {/* FROM */}
               <div className="md:col-span-4 p-4 hover:bg-blue-50/40 transition relative">
-                <label className="block text-xs font-bold uppercase text-slate-500 mb-1">From</label>
-                <select
+                <StationSearchField
+                  label="From"
                   value={fromCode}
-                  onChange={(e) => setFromCode(e.target.value)}
-                  className="w-full bg-transparent text-2xl font-extrabold text-slate-900 focus:outline-none cursor-pointer"
-                >
-                  {STATIONS.map(s => (
-                    <option key={s.code} value={s.code}>
-                      {s.city} ({s.code})
-                    </option>
-                  ))}
-                </select>
-                <div className="text-xs text-slate-500 truncate mt-0.5">
-                  {fromStationObj.name} • {fromStationObj.gate}
-                </div>
+                  stations={STATIONS}
+                  onChange={setFromCode}
+                  subtitleMode="gate"
+                />
 
                 {/* Circular Swap Button on Desktop */}
                 <button
@@ -2847,31 +2840,21 @@ export default function App() {
 
               {/* TO */}
               <div className="md:col-span-4 p-4 md:pl-7 hover:bg-blue-50/40 transition">
-                <label className="block text-xs font-bold uppercase text-slate-500 mb-1">To</label>
-                <select
+                <StationSearchField
+                  label="To"
                   value={toCode}
-                  onChange={(e) => setToCode(e.target.value)}
-                  className="w-full bg-transparent text-2xl font-extrabold text-slate-900 focus:outline-none cursor-pointer"
-                >
-                  {STATIONS.map(s => (
-                    <option key={s.code} value={s.code}>
-                      {s.city} ({s.code})
-                    </option>
-                  ))}
-                </select>
-                <div className="text-xs text-slate-500 truncate mt-0.5">
-                  {toStationObj.name} • {toStationObj.state}
-                </div>
+                  stations={STATIONS}
+                  onChange={setToCode}
+                  subtitleMode="state"
+                />
               </div>
 
               {/* TRAVEL DATE */}
               <div className="md:col-span-2 p-4 hover:bg-blue-50/40 transition">
-                <label className="block text-xs font-bold uppercase text-slate-500 mb-1">Travel Date</label>
-                <div className="text-2xl font-extrabold text-slate-900">
-                  {selectedDateObj.dayNum}{' '}
-                  <span className="text-base font-bold text-slate-600">{selectedDateObj.month}&apos;26</span>
-                </div>
-                <div className="text-xs text-slate-500 mt-0.5">{selectedDateObj.weekday}day</div>
+                <TravelDatePickerField
+                  selectedIso={travelDate}
+                  onSelectDate={setTravelDate}
+                />
               </div>
 
               {/* CLASS */}
