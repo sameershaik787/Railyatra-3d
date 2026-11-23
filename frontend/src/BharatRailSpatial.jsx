@@ -1,4 +1,5 @@
 import { mergeAllIndiaStations, resolveTravelDateObj, StationSearchField, TravelDatePickerField } from './components/SearchBarWidgets';
+import { shareTicketOnWhatsApp } from './utils/whatsappShare';
 import EmbeddedAuthCard from './components/EmbeddedAuthCard';
 import { QUOTA_PILLS, TRAINS_CATALOG } from './data/railData';
 import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
@@ -2647,6 +2648,29 @@ export default function App() {
           ? selectedWallet
           : 'Credit / Debit Card'
     };
+    /* RY_WA_SHARE */
+    if (whatsappAlerts) {
+      try {
+        const __t = ticket;
+        const __seats = Array.isArray(__t.seats)
+          ? __t.seats
+          : Array.isArray(__t.berths)
+          ? __t.berths.map((b) => (typeof b === 'object' ? (b.displayNum || b.seatNumber || b.id || '') : b)).filter(Boolean)
+          : (__t.seat || __t.berth || []);
+        shareTicketOnWhatsApp({
+          pnr: __t.pnr || __t.pnrNumber || __t.id || 'N/A',
+          trainName: __t.trainName || __t.train?.name || 'RailYatra Express',
+          trainNumber: __t.trainNumber || __t.train?.number || '',
+          from: __t.from || __t.source || __t.fromStation || __t.origin || '',
+          to: __t.to || __t.destination || __t.toStation || '',
+          journeyDate: __t.journeyDate || __t.date || __t.travelDate || '',
+          coach: __t.coach || __t.coachName || __t.coachId || '',
+          seats: __seats,
+          passengerName: __t.passengerName || __t.passengers?.[0]?.name || __t.name || 'Traveller',
+          fare: __t.totalFare ?? __t.grandTotal ?? __t.fare ?? __t.amount ?? 0,
+        }, __t.contactMobile || contactMobile);
+      } catch {}
+    }
 
     setMyTickets(prev => [ticket, ...prev]);
     setTicketModalData(ticket);
