@@ -55,7 +55,7 @@ app.post('/api/send-otp', async (req, res) => {
 
     if (!smtpUser || !smtpPass) {
       return res.status(503).json({
-        detail: 'Email server not configured. Add SMTP_USER and SMTP_PASS in Render Environment Variables.',
+        detail: 'SMTP_USER or SMTP_PASS not set in Render Environment Variables.',
       });
     }
 
@@ -77,42 +77,36 @@ app.post('/api/send-otp', async (req, res) => {
         ? 'Verify Your RailYatra 3D Account'
         : 'Your RailYatra 3D Sign-In Code';
 
-    const transporter =
-      smtpHost === 'smtp.gmail.com'
-        ? nodemailer.createTransport({
-            service: 'gmail',
-            auth: { user: smtpUser, pass: smtpPass },
-          })
-        : nodemailer.createTransport({
-            host: smtpHost,
-            port: smtpPort,
-            secure: smtpPort === 465,
-            auth: { user: smtpUser, pass: smtpPass },
-          });
+    const transportOpts = {
+      host: smtpHost,
+      port: smtpPort,
+      secure: smtpPort === 465,
+      auth: { user: smtpUser, pass: smtpPass },
+      connectionTimeout: 8000,
+      greetingTimeout: 8000,
+      socketTimeout: 10000,
+    };
+
+    const transporter = nodemailer.createTransport(transportOpts);
 
     await transporter.sendMail({
       from: `"RailYatra 3D Security" <${smtpUser}>`,
       to: email,
       subject: `${subjectTitle}: ${otp}`,
       text: `Hello ${name},\n\nYour 6-digit RailYatra 3D verification code is: ${otp}\n\nPortal Role: ${role.toUpperCase()}\nValid for: 5 minutes.`,
-      html: `
-        <div style="font-family:Segoe UI,Arial,sans-serif;max-width:480px;margin:0 auto;padding:24px;border:1px solid #e2e8f0;border-radius:14px;background:#ffffff;">
-          <div style="font-size:12px;font-weight:700;color:#1d4ed8;letter-spacing:0.06em;text-transform:uppercase;margin-bottom:6px;">RailYatra 3D Security</div>
-          <h2 style="color:#07244d;margin:0 0 10px;font-size:20px;">${subjectTitle}</h2>
-          <p style="color:#334155;font-size:14px;line-height:1.5;margin:0 0 18px;">
-            Hello <strong>${name}</strong>, enter the verification code below for your <strong>${role.toUpperCase()}</strong> portal:
-          </p>
-          <div style="background:#eff6ff;border:1px solid #bfdbfe;border-radius:12px;padding:18px;text-align:center;margin:20px 0;">
-            <span style="font-size:30px;font-weight:700;letter-spacing:10px;color:#1d4ed8;font-family:monospace;">${otp}</span>
-          </div>
-          <p style="color:#64748b;font-size:12px;margin:0;">This code expires in 5 minutes. Never share your OTP with anyone.</p>
-        </div>
-      `,
     });
 
-    return res.status(200).json({ sent: true, email, role, challenge, expires_in: 300 });
+    return res.status(200).json({
+      sent: true,
+      email,
+      role,
+      challenge,
+      expires_in: 300,
+    });
   } catch (err) {
-    return res.status(500).json({ detail: err?.message || 'Unable to send verification email.' });
+    return res.status(504).json({
+      detail: err?.message || 'SMTP connection timed out or failed.',
+    });
   }
 });
 
