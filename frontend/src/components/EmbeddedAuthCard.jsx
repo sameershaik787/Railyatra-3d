@@ -11,7 +11,6 @@ import {
   Lock,
   Eye,
   EyeOff,
-  Database,
 } from 'lucide-react';
 
 const DISPOSABLE_DOMAINS = [
@@ -40,7 +39,7 @@ export default function EmbeddedAuthCard({ onAuthenticated }) {
 
   const [step, setStep] = useState('details');
   const [otpDigits, setOtpDigits] = useState(['', '', '', '', '', '']);
-  const [challenge, setChallenge] = useState('');
+  const [generatedOtp, setGeneratedOtp] = useState('');
   const [error, setError] = useState('');
   const [successMsg, setSuccessMsg] = useState('');
   const [loading, setLoading] = useState(false);
@@ -62,7 +61,7 @@ export default function EmbeddedAuthCard({ onAuthenticated }) {
     setMode(nextMode);
     setStep('details');
     setOtpDigits(['', '', '', '', '', '']);
-    setChallenge('');
+    setGeneratedOtp('');
     setPassword('');
     setConfirmPassword('');
     setError('');
@@ -114,7 +113,7 @@ export default function EmbeddedAuthCard({ onAuthenticated }) {
     return '';
   };
 
-  const handleSendOtp = async (e) => {
+  const handleSendOtp = (e) => {
     e?.preventDefault();
     const validationErr = validateDetails();
     if (validationErr) {
@@ -122,56 +121,33 @@ export default function EmbeddedAuthCard({ onAuthenticated }) {
       return;
     }
 
-    const cleanedEmail = email.trim().toLowerCase();
     setError('');
     setSuccessMsg('');
     setLoading(true);
 
-    try {
-      const res = await fetch('/.netlify/functions/send-otp', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          email: cleanedEmail,
-          name: name.trim(),
-          password,
-          role,
-          purpose: mode,
-        }),
-      });
-
-      const contentType = res.headers.get('content-type') || '';
-      if (!contentType.includes('application/json')) {
-        throw new Error('Backend auth API unavailable on localhost preview. Deploy on Netlify to test live.');
-      }
-
-      const data = await res.json();
-      if (!res.ok) {
-        throw new Error(data.detail || 'Could not send verification email.');
-      }
-
-      setChallenge(data.challenge || '');
-      setOtpDigits(['', '', '', '', '', '']);
-      setStep('otp');
-      setSecondsLeft(300);
-      setResendCooldown(30);
-      setTimeout(() => otpRefs.current[0]?.focus(), 100);
-    } catch (err) {
-      setError(err.message || 'Unable to dispatch OTP email.');
-    } finally {
-      setLoading(false);
-    }
+    const code = String(Math.floor(100000 + Math.random() * 900000));
+    setGeneratedOtp(code);
+    setOtpDigits(['', '', '', '', '', '']);
+    setStep('otp');
+    setSecondsLeft(300);
+    setResendCooldown(30);
+    setLoading(false);
+    setTimeout(() => otpRefs.current[0]?.focus(), 100);
   };
 
-  const handleVerifyOtp = async (e) => {
+  const handleVerifyOtp = (e) => {
     e?.preventDefault();
     const code = otpDigits.join('');
     if (code.length !== 6) {
-      setError('Enter all 6 digits of the OTP sent to your email.');
+      setError('Enter all 6 digits of the verification code.');
       return;
     }
     if (secondsLeft <= 0) {
-      setError('OTP expired. Click Resend OTP to generate a fresh code.');
+      setError('Code expired. Click Resend OTP to generate a fresh code.');
+      return;
+    }
+    if (code !== generatedOtp) {
+      setError(`Incorrect 6-digit code. Use demo code: ${generatedOtp}`);
       return;
     }
     if (mode === 'forgot') {
@@ -183,46 +159,25 @@ export default function EmbeddedAuthCard({ onAuthenticated }) {
         setError('New password and Confirm Password do not match.');
         return;
       }
+      setPassword('');
+      setConfirmPassword('');
+      setOtpDigits(['', '', '', '', '', '']);
+      setMode('login');
+      setStep('details');
+      setSuccessMsg('Password updated for this session. Sign in with your new password.');
+      return;
     }
 
-    setError('');
-    setLoading(true);
-
-    try {
-      const res = await fetch('/.netlify/functions/verify-otp', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          email: email.trim().toLowerCase(),
-          otp: code,
-          challenge,
-          newPassword: mode === 'forgot' ? password : '',
-        }),
-      });
-
-      const data = await res.json();
-      if (!res.ok) {
-        throw new Error(data.detail || 'Incorrect 6-digit OTP.');
-      }
-
-      if (mode === 'forgot') {
-        setPassword('');
-        setConfirmPassword('');
-        setOtpDigits(['', '', '', '', '', '']);
-        setMode('login');
-        setStep('details');
-        setSuccessMsg('Password updated in database. Sign in with your new password.');
-      } else {
-        onAuthenticated?.({
-          token: data.access_token,
-          ...data.user,
-        });
-      }
-    } catch (err) {
-      setError(err.message || 'Verification failed. Check your 6-digit OTP.');
-    } finally {
-      setLoading(false);
-    }
+    const cleanedEmail = email.trim().toLowerCase();
+    const displayName = name.trim() || cleanedEmail.split('@')[0];
+    onAuthenticated?.({
+      email: cleanedEmail,
+      name: displayName,
+      role,
+      verified: true,
+      verified_at: new Date().toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' }) + ' IST',
+      status: 'Active',
+    });
   };
 
   const mins = String(Math.floor(secondsLeft / 60)).padStart(2, '0');
@@ -269,40 +224,38 @@ export default function EmbeddedAuthCard({ onAuthenticated }) {
         </h2>
         <p className="text-xs text-slate-500 mt-1">
           {mode === 'signup'
-            ? 'Create your cloud-synced RailYatra 3D account and verify via Email OTP.'
+            ? 'Create your RailYatra 3D session and verify with a 6-digit code.'
             : mode === 'forgot'
-            ? 'Verify your registered email via OTP to reset your password.'
-            : 'Sign in across any device with your email, password, and 6-digit Email OTP.'}
+            ? 'Verify your email to reset your password for this session.'
+            : 'Sign in with your email, password, and 6-digit verification code.'}
         </p>
       </div>
 
-      {mode === 'signup' && (
-        <div className="mb-5">
-          <label className="block text-[11px] font-bold uppercase tracking-wider text-slate-500 mb-2">
-            Select Portal Role
-          </label>
-          <div className="grid grid-cols-3 gap-2">
-            {ROLES.map((item) => {
-              const active = role === item.id;
-              return (
-                <button
-                  key={item.id}
-                  type="button"
-                  disabled={step === 'otp'}
-                  onClick={() => setRole(item.id)}
-                  className={`rounded-xl px-2.5 py-2.5 text-center border text-xs font-bold transition ${
-                    active
-                      ? 'bg-blue-50 border-blue-600 text-blue-700 shadow-xs'
-                      : 'bg-slate-50 border-slate-200 text-slate-700 hover:border-blue-300'
-                  } ${step === 'otp' ? 'opacity-65 cursor-not-allowed' : ''}`}
-                >
-                  {item.label}
-                </button>
-              );
-            })}
-          </div>
+      <div className="mb-5">
+        <label className="block text-[11px] font-bold uppercase tracking-wider text-slate-500 mb-2">
+          Select Portal Role
+        </label>
+        <div className="grid grid-cols-3 gap-2">
+          {ROLES.map((item) => {
+            const active = role === item.id;
+            return (
+              <button
+                key={item.id}
+                type="button"
+                disabled={step === 'otp'}
+                onClick={() => setRole(item.id)}
+                className={`rounded-xl px-2.5 py-2.5 text-center border text-xs font-bold transition ${
+                  active
+                    ? 'bg-blue-50 border-blue-600 text-blue-700 shadow-xs'
+                    : 'bg-slate-50 border-slate-200 text-slate-700 hover:border-blue-300'
+                } ${step === 'otp' ? 'opacity-65 cursor-not-allowed' : ''}`}
+              >
+                {item.label}
+              </button>
+            );
+          })}
         </div>
-      )}
+      </div>
 
       {successMsg && (
         <div className="mb-4 rounded-xl bg-emerald-50 border border-emerald-200 px-3.5 py-2.5 text-xs font-medium text-emerald-800 flex items-center gap-2">
@@ -420,12 +373,12 @@ export default function EmbeddedAuthCard({ onAuthenticated }) {
             className="w-full rounded-full bg-gradient-to-r from-blue-600 to-blue-500 hover:from-blue-700 hover:to-blue-600 text-white font-semibold py-3.5 text-sm shadow-md flex items-center justify-center gap-2 transition active:scale-95 disabled:opacity-60"
           >
             {loading
-              ? 'Verifying & Sending OTP...'
+              ? 'Generating Code...'
               : mode === 'forgot'
-              ? 'Send Reset OTP to Email'
+              ? 'Send Reset OTP'
               : mode === 'signup'
-              ? 'Send Sign Up OTP to Email'
-              : 'Send Login OTP to Email'}
+              ? 'Send Sign Up OTP'
+              : 'Send Login OTP'}
             <ArrowRight className="w-4 h-4" />
           </button>
 
@@ -445,16 +398,16 @@ export default function EmbeddedAuthCard({ onAuthenticated }) {
           <div className="rounded-xl bg-blue-50 border border-blue-200 p-3.5 text-xs text-blue-900">
             <div className="font-bold flex items-center gap-1.5">
               <Mail className="w-3.5 h-3.5 text-blue-600" />
-              OTP emailed to {email.trim().toLowerCase()}
+              Verification code for {email.trim().toLowerCase()}
             </div>
-            <p className="mt-1 text-blue-800">
-              Enter the 6-digit code from your Inbox or Spam folder.
+            <p className="mt-1 text-blue-800 font-mono">
+              Demo OTP: <strong>{generatedOtp}</strong>
             </p>
           </div>
 
           <div>
             <div className="flex items-center justify-between mb-2">
-              <label className="text-xs font-semibold text-slate-700">6-Digit Email OTP</label>
+              <label className="text-xs font-semibold text-slate-700">6-Digit OTP</label>
               <span className="text-xs font-mono font-semibold text-blue-700">
                 Expires in {mins}:{secs}
               </span>
@@ -476,53 +429,6 @@ export default function EmbeddedAuthCard({ onAuthenticated }) {
             </div>
           </div>
 
-          {mode === 'forgot' && (
-            <>
-              <div>
-                <label className="block text-xs font-semibold text-slate-700 mb-1.5">
-                  New Password <span className="text-rose-600">*</span>
-                </label>
-                <div className="relative">
-                  <Lock className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
-                  <input
-                    type={showPassword ? 'text' : 'password'}
-                    required
-                    minLength={6}
-                    value={password}
-                    onChange={(e) => setPassword(e.target.value)}
-                    placeholder="Minimum 6 characters"
-                    className="w-full rounded-xl bg-slate-50 border border-slate-200 focus:border-blue-600 focus:bg-white pl-10 pr-11 py-3 text-sm text-slate-900 outline-none transition"
-                  />
-                  <button
-                    type="button"
-                    onClick={() => setShowPassword((v) => !v)}
-                    className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-700"
-                  >
-                    {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
-                  </button>
-                </div>
-              </div>
-
-              <div>
-                <label className="block text-xs font-semibold text-slate-700 mb-1.5">
-                  Confirm New Password <span className="text-rose-600">*</span>
-                </label>
-                <div className="relative">
-                  <Lock className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
-                  <input
-                    type={showPassword ? 'text' : 'password'}
-                    required
-                    minLength={6}
-                    value={confirmPassword}
-                    onChange={(e) => setConfirmPassword(e.target.value)}
-                    placeholder="Re-enter new password"
-                    className="w-full rounded-xl bg-slate-50 border border-slate-200 focus:border-blue-600 focus:bg-white pl-10 pr-4 py-3 text-sm text-slate-900 outline-none transition"
-                  />
-                </div>
-              </div>
-            </>
-          )}
-
           {error && (
             <div className="rounded-xl bg-rose-50 border border-rose-200 px-3.5 py-2.5 text-xs font-medium text-rose-700 flex items-center gap-2">
               <AlertCircle className="w-4 h-4 shrink-0" />
@@ -535,13 +441,7 @@ export default function EmbeddedAuthCard({ onAuthenticated }) {
             disabled={loading}
             className="w-full rounded-full bg-gradient-to-r from-blue-600 to-blue-500 hover:from-blue-700 hover:to-blue-600 text-white font-semibold py-3.5 text-sm shadow-md flex items-center justify-center gap-2 transition active:scale-95 disabled:opacity-60"
           >
-            {loading
-              ? 'Verifying OTP...'
-              : mode === 'forgot'
-              ? 'Verify OTP & Update Password'
-              : mode === 'signup'
-              ? 'Verify OTP & Create Account'
-              : 'Verify OTP & Sign In'}
+            {loading ? 'Verifying...' : 'Verify OTP & Continue'}
             <ShieldCheck className="w-4 h-4" />
           </button>
 
@@ -569,14 +469,6 @@ export default function EmbeddedAuthCard({ onAuthenticated }) {
           </div>
         </form>
       )}
-
-      <div className="mt-5 pt-4 border-t border-slate-100 flex items-center justify-between text-[11px] text-slate-500">
-        <span className="flex items-center gap-1">
-          <Database className="w-3 h-3 text-emerald-600" />
-          MongoDB Atlas Cloud Auth
-        </span>
-        <span>scrypt + Email OTP</span>
-      </div>
     </div>
   );
 }
