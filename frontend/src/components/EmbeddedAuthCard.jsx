@@ -39,11 +39,9 @@ export default function EmbeddedAuthCard({ onAuthenticated }) {
 
   const [step, setStep] = useState('details');
   const [otpDigits, setOtpDigits] = useState(['', '', '', '', '', '']);
-  const [challenge, setChallenge] = useState('');
-  const [fallbackOtp, setFallbackOtp] = useState('');
+  const [generatedOtp, setGeneratedOtp] = useState('');
   const [error, setError] = useState('');
   const [successMsg, setSuccessMsg] = useState('');
-  const [loading, setLoading] = useState(false);
   const [secondsLeft, setSecondsLeft] = useState(0);
   const [resendCooldown, setResendCooldown] = useState(0);
 
@@ -62,8 +60,7 @@ export default function EmbeddedAuthCard({ onAuthenticated }) {
     setMode(nextMode);
     setStep('details');
     setOtpDigits(['', '', '', '', '', '']);
-    setChallenge('');
-    setFallbackOtp('');
+    setGeneratedOtp('');
     setPassword('');
     setConfirmPassword('');
     setError('');
@@ -115,19 +112,7 @@ export default function EmbeddedAuthCard({ onAuthenticated }) {
     return '';
   };
 
-  const activateFallbackOtp = (reasonText) => {
-    const code = String(Math.floor(100000 + Math.random() * 900000));
-    setChallenge('');
-    setFallbackOtp(code);
-    setOtpDigits(['', '', '', '', '', '']);
-    setStep('otp');
-    setSecondsLeft(300);
-    setResendCooldown(15);
-    setError(reasonText ? `${reasonText} Using instant code ${code} below.` : '');
-    setTimeout(() => otpRefs.current[0]?.focus(), 100);
-  };
-
-  const handleSendOtp = async (e) => {
+  const handleSendOtp = (e) => {
     e?.preventDefault();
     const validationErr = validateDetails();
     if (validationErr) {
@@ -135,58 +120,18 @@ export default function EmbeddedAuthCard({ onAuthenticated }) {
       return;
     }
 
-    const cleanedEmail = email.trim().toLowerCase();
+    const code = String(Math.floor(100000 + Math.random() * 900000));
     setError('');
     setSuccessMsg('');
-    setFallbackOtp('');
-    setLoading(true);
-
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 7500);
-
-    try {
-      const res = await fetch('/api/send-otp', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        signal: controller.signal,
-        body: JSON.stringify({
-          email: cleanedEmail,
-          name: name.trim(),
-          password,
-          role,
-          purpose: mode,
-        }),
-      });
-      clearTimeout(timeoutId);
-
-      const contentType = res.headers.get('content-type') || '';
-      if (!contentType.includes('application/json')) {
-        activateFallbackOtp('Email gateway unavailable on this host.');
-        return;
-      }
-
-      const data = await res.json();
-      if (!res.ok) {
-        activateFallbackOtp(data.detail || 'Email delivery delayed or unconfigured.');
-        return;
-      }
-
-      setChallenge(data.challenge || '');
-      setFallbackOtp('');
-      setOtpDigits(['', '', '', '', '', '']);
-      setStep('otp');
-      setSecondsLeft(300);
-      setResendCooldown(30);
-      setTimeout(() => otpRefs.current[0]?.focus(), 100);
-    } catch {
-      clearTimeout(timeoutId);
-      activateFallbackOtp('SMTP timed out on server.');
-    } finally {
-      setLoading(false);
-    }
+    setGeneratedOtp(code);
+    setOtpDigits(['', '', '', '', '', '']);
+    setStep('otp');
+    setSecondsLeft(300);
+    setResendCooldown(15);
+    setTimeout(() => otpRefs.current[0]?.focus(), 100);
   };
 
-  const handleVerifyOtp = async (e) => {
+  const handleVerifyOtp = (e) => {
     e?.preventDefault();
     const code = otpDigits.join('');
     if (code.length !== 6) {
@@ -197,37 +142,8 @@ export default function EmbeddedAuthCard({ onAuthenticated }) {
       setError('OTP expired. Click Resend OTP to generate a fresh code.');
       return;
     }
-
-    const cleanedEmail = email.trim().toLowerCase();
-    const displayName = name.trim() || cleanedEmail.split('@')[0];
-
-    if (fallbackOtp) {
-      if (code !== fallbackOtp) {
-        setError(`Incorrect code. Enter ${fallbackOtp}.`);
-        return;
-      }
-      if (mode === 'forgot') {
-        if (password.length < 6 || password !== confirmPassword) {
-          setError('Enter matching new passwords (at least 6 characters).');
-          return;
-        }
-        setPassword('');
-        setConfirmPassword('');
-        setOtpDigits(['', '', '', '', '', '']);
-        setFallbackOtp('');
-        setMode('login');
-        setStep('details');
-        setSuccessMsg('Password updated for this session. Sign in now.');
-        return;
-      }
-      onAuthenticated?.({
-        email: cleanedEmail,
-        name: displayName,
-        role,
-        verified: true,
-        verified_at: new Date().toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' }) + ' IST',
-        status: 'Active',
-      });
+    if (code !== generatedOtp) {
+      setError(`Incorrect 6-digit code. Use Demo OTP: ${generatedOtp}`);
       return;
     }
 
@@ -240,46 +156,26 @@ export default function EmbeddedAuthCard({ onAuthenticated }) {
         setError('New password and Confirm Password do not match.');
         return;
       }
+      setPassword('');
+      setConfirmPassword('');
+      setOtpDigits(['', '', '', '', '', '']);
+      setGeneratedOtp('');
+      setMode('login');
+      setStep('details');
+      setSuccessMsg('Password updated for this session. Sign in with your new password.');
+      return;
     }
 
-    setError('');
-    setLoading(true);
-
-    try {
-      const res = await fetch('/api/verify-otp', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          email: cleanedEmail,
-          otp: code,
-          challenge,
-          newPassword: mode === 'forgot' ? password : '',
-        }),
-      });
-
-      const data = await res.json();
-      if (!res.ok) {
-        throw new Error(data.detail || 'Incorrect 6-digit OTP.');
-      }
-
-      if (mode === 'forgot') {
-        setPassword('');
-        setConfirmPassword('');
-        setOtpDigits(['', '', '', '', '', '']);
-        setMode('login');
-        setStep('details');
-        setSuccessMsg('Password verified and updated for this session.');
-      } else {
-        onAuthenticated?.({
-          token: data.access_token,
-          ...data.user,
-        });
-      }
-    } catch (err) {
-      setError(err.message || 'Verification failed. Check your 6-digit OTP.');
-    } finally {
-      setLoading(false);
-    }
+    const cleanedEmail = email.trim().toLowerCase();
+    const displayName = name.trim() || cleanedEmail.split('@')[0];
+    onAuthenticated?.({
+      email: cleanedEmail,
+      name: displayName,
+      role,
+      verified: true,
+      verified_at: new Date().toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' }) + ' IST',
+      status: 'Active',
+    });
   };
 
   const mins = String(Math.floor(secondsLeft / 60)).padStart(2, '0');
@@ -326,7 +222,7 @@ export default function EmbeddedAuthCard({ onAuthenticated }) {
         </h2>
         <p className="text-xs text-slate-500 mt-1">
           {mode === 'signup'
-            ? 'Create your RailYatra 3D session and verify via 6-digit OTP.'
+            ? 'Create your RailYatra 3D session and verify with a 6-digit OTP.'
             : mode === 'forgot'
             ? 'Verify your email via OTP to reset your password.'
             : 'Sign in with your email, password, and 6-digit OTP.'}
@@ -471,16 +367,13 @@ export default function EmbeddedAuthCard({ onAuthenticated }) {
 
           <button
             type="submit"
-            disabled={loading}
-            className="w-full rounded-full bg-gradient-to-r from-blue-600 to-blue-500 hover:from-blue-700 hover:to-blue-600 text-white font-semibold py-3.5 text-sm shadow-md flex items-center justify-center gap-2 transition active:scale-95 disabled:opacity-60"
+            className="w-full rounded-full bg-gradient-to-r from-blue-600 to-blue-500 hover:from-blue-700 hover:to-blue-600 text-white font-semibold py-3.5 text-sm shadow-md flex items-center justify-center gap-2 transition active:scale-95"
           >
-            {loading
-              ? 'Sending OTP...'
-              : mode === 'forgot'
-              ? 'Send Reset OTP to Email'
+            {mode === 'forgot'
+              ? 'Generate Reset OTP'
               : mode === 'signup'
-              ? 'Send Sign Up OTP to Email'
-              : 'Send Login OTP to Email'}
+              ? 'Generate Sign Up OTP'
+              : 'Generate Login OTP'}
             <ArrowRight className="w-4 h-4" />
           </button>
 
@@ -500,12 +393,10 @@ export default function EmbeddedAuthCard({ onAuthenticated }) {
           <div className="rounded-xl bg-blue-50 border border-blue-200 p-3.5 text-xs text-blue-900">
             <div className="font-bold flex items-center gap-1.5">
               <Mail className="w-3.5 h-3.5 text-blue-600" />
-              OTP step for {email.trim().toLowerCase()}
+              Session OTP for {email.trim().toLowerCase()}
             </div>
-            <p className="mt-1 text-blue-800">
-              {fallbackOtp
-                ? `Fallback OTP: ${fallbackOtp}`
-                : 'Enter the 6-digit code sent to your inbox or spam folder.'}
+            <p className="mt-1 text-blue-800 font-mono">
+              Demo OTP: <strong className="text-sm tracking-widest">{generatedOtp}</strong>
             </p>
           </div>
 
@@ -589,12 +480,9 @@ export default function EmbeddedAuthCard({ onAuthenticated }) {
 
           <button
             type="submit"
-            disabled={loading}
-            className="w-full rounded-full bg-gradient-to-r from-blue-600 to-blue-500 hover:from-blue-700 hover:to-blue-600 text-white font-semibold py-3.5 text-sm shadow-md flex items-center justify-center gap-2 transition active:scale-95 disabled:opacity-60"
+            className="w-full rounded-full bg-gradient-to-r from-blue-600 to-blue-500 hover:from-blue-700 hover:to-blue-600 text-white font-semibold py-3.5 text-sm shadow-md flex items-center justify-center gap-2 transition active:scale-95"
           >
-            {loading
-              ? 'Verifying OTP...'
-              : mode === 'forgot'
+            {mode === 'forgot'
               ? 'Verify OTP & Update Password'
               : mode === 'signup'
               ? 'Verify OTP & Create Account'
@@ -617,7 +505,7 @@ export default function EmbeddedAuthCard({ onAuthenticated }) {
             <button
               type="button"
               onClick={handleSendOtp}
-              disabled={loading || resendCooldown > 0}
+              disabled={resendCooldown > 0}
               className="text-blue-600 hover:text-blue-800 font-semibold flex items-center gap-1 disabled:opacity-50"
             >
               <RefreshCw className="w-3.5 h-3.5" />
